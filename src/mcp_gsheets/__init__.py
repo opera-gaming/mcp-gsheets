@@ -15,11 +15,10 @@ This package provides complete coverage of the Google Sheets API including:
 """
 
 from . import server
-import asyncio
 
 def main():
     """Main entry point for the package."""
-    asyncio.run(server.main())
+    server.mcp.run()
 
 __version__ = "0.1.0"
 __all__ = ['main', 'server']

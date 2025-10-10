@@ -130,6 +130,30 @@ def get_sheet_id(sheets_service: Any, spreadsheet_id: str, sheet_name: str) -> O
     return None
 
 
+def parse_a1_notation(a1_range: str) -> Dict[str, int]:
+    """Parse A1 notation range to grid coordinates"""
+    import re
+
+    match = re.match(r'([A-Z]+)(\d+):([A-Z]+)(\d+)', a1_range)
+    if not match:
+        return None
+
+    def col_to_index(col: str) -> int:
+        index = 0
+        for char in col:
+            index = index * 26 + (ord(char) - ord('A') + 1)
+        return index - 1
+
+    start_col, start_row, end_col, end_row = match.groups()
+
+    return {
+        'startRowIndex': int(start_row) - 1,
+        'endRowIndex': int(end_row),
+        'startColumnIndex': col_to_index(start_col),
+        'endColumnIndex': col_to_index(end_col) + 1
+    }
+
+
 # ============================================================================
 # CORE CRUD OPERATIONS
 # ============================================================================
@@ -894,6 +918,9 @@ def add_chart(
     title: Optional[str] = None,
     position_row: int = 0,
     position_col: int = 0,
+    y_axis_min: Optional[float] = None,
+    y_axis_max: Optional[float] = None,
+    use_first_row_as_headers: bool = False,
     ctx: Context = None
 ) -> Dict[str, Any]:
     """
@@ -907,6 +934,9 @@ def add_chart(
         title: Optional chart title
         position_row: Row position for chart (default: 0)
         position_col: Column position for chart (default: 0)
+        y_axis_min: Optional minimum value for Y-axis
+        y_axis_max: Optional maximum value for Y-axis
+        use_first_row_as_headers: Use first row of data as column headers (default: False)
 
     Returns:
         Result including chart ID
@@ -917,51 +947,72 @@ def add_chart(
     if sheet_id is None:
         return {"error": f"Sheet '{sheet}' not found"}
 
-    chart_spec = {
-        "title": title or "Chart",
-        "basicChart": {
-            "chartType": chart_type.upper(),
-            "legendPosition": "RIGHT_LEGEND",
-            "axis": [
-                {"position": "BOTTOM_AXIS"},
-                {"position": "LEFT_AXIS"}
-            ],
-            "domains": [
-                {
-                    "domain": {
-                        "sourceRange": {
-                            "sources": [
-                                {
-                                    "sheetId": sheet_id,
-                                    "startRowIndex": 0,
-                                    "endRowIndex": 10,
-                                    "startColumnIndex": 0,
-                                    "endColumnIndex": 1
-                                }
-                            ]
+    coords = parse_a1_notation(data_range)
+    if coords is None:
+        return {"error": f"Invalid range format: {data_range}. Use A1 notation like 'A1:B10'"}
+
+    num_columns = coords['endColumnIndex'] - coords['startColumnIndex']
+
+    series = []
+    for i in range(1, num_columns):
+        series.append({
+            "series": {
+                "sourceRange": {
+                    "sources": [
+                        {
+                            "sheetId": sheet_id,
+                            "startRowIndex": coords['startRowIndex'],
+                            "endRowIndex": coords['endRowIndex'],
+                            "startColumnIndex": coords['startColumnIndex'] + i,
+                            "endColumnIndex": coords['startColumnIndex'] + i + 1
                         }
+                    ]
+                }
+            },
+            "targetAxis": "LEFT_AXIS"
+        })
+
+    left_axis = {"position": "LEFT_AXIS"}
+    if y_axis_min is not None or y_axis_max is not None:
+        left_axis["viewWindowOptions"] = {}
+        if y_axis_min is not None:
+            left_axis["viewWindowOptions"]["viewWindowMin"] = y_axis_min
+        if y_axis_max is not None:
+            left_axis["viewWindowOptions"]["viewWindowMax"] = y_axis_max
+
+    basic_chart = {
+        "chartType": chart_type.upper(),
+        "legendPosition": "RIGHT_LEGEND",
+        "axis": [
+            {"position": "BOTTOM_AXIS"},
+            left_axis
+        ],
+        "domains": [
+            {
+                "domain": {
+                    "sourceRange": {
+                        "sources": [
+                            {
+                                "sheetId": sheet_id,
+                                "startRowIndex": coords['startRowIndex'],
+                                "endRowIndex": coords['endRowIndex'],
+                                "startColumnIndex": coords['startColumnIndex'],
+                                "endColumnIndex": coords['startColumnIndex'] + 1
+                            }
+                        ]
                     }
                 }
-            ],
-            "series": [
-                {
-                    "series": {
-                        "sourceRange": {
-                            "sources": [
-                                {
-                                    "sheetId": sheet_id,
-                                    "startRowIndex": 0,
-                                    "endRowIndex": 10,
-                                    "startColumnIndex": 1,
-                                    "endColumnIndex": 2
-                                }
-                            ]
-                        }
-                    },
-                    "targetAxis": "LEFT_AXIS"
-                }
-            ]
-        }
+            }
+        ],
+        "series": series
+    }
+
+    if use_first_row_as_headers:
+        basic_chart["headerCount"] = 1
+
+    chart_spec = {
+        "title": title or "Chart",
+        "basicChart": basic_chart
     }
 
     request_body = {
@@ -1723,8 +1774,3 @@ def share_spreadsheet(
         'successes': successes,
         'failures': failures
     }
-
-
-async def main():
-    """Main entry point"""
-    await mcp.run()
