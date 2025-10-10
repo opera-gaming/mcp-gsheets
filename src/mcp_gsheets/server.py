@@ -1085,89 +1085,6 @@ def delete_chart(
 # ============================================================================
 
 @mcp.tool()
-def format_cells(
-    spreadsheet_id: str,
-    sheet: str,
-    range: str,
-    background_color: Optional[Dict[str, float]] = None,
-    text_color: Optional[Dict[str, float]] = None,
-    bold: Optional[bool] = None,
-    italic: Optional[bool] = None,
-    font_size: Optional[int] = None,
-    horizontal_alignment: Optional[str] = None,
-    ctx: Context = None
-) -> Dict[str, Any]:
-    """
-    Format cells with colors, fonts, and alignment.
-
-    Args:
-        spreadsheet_id: The ID of the spreadsheet
-        sheet: The name of the sheet
-        range: Cell range in A1 notation
-        background_color: RGB dict with keys 'red', 'green', 'blue' (0.0-1.0)
-        text_color: RGB dict for text color
-        bold: Make text bold
-        italic: Make text italic
-        font_size: Font size in points
-        horizontal_alignment: LEFT, CENTER, or RIGHT
-
-    Returns:
-        Result of the formatting operation
-    """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
-
-    sheet_id = get_sheet_id(sheets_service, spreadsheet_id, sheet)
-    if sheet_id is None:
-        return {"error": f"Sheet '{sheet}' not found"}
-
-    # Parse range to get grid coordinates
-    # Simplified - assumes range like "A1:B10"
-    cell_format = {}
-
-    if background_color:
-        cell_format["backgroundColor"] = background_color
-
-    if text_color or bold is not None or italic is not None or font_size:
-        text_format = {}
-        if bold is not None:
-            text_format["bold"] = bold
-        if italic is not None:
-            text_format["italic"] = italic
-        if font_size:
-            text_format["fontSize"] = font_size
-        if text_color:
-            text_format["foregroundColor"] = text_color
-        cell_format["textFormat"] = text_format
-
-    if horizontal_alignment:
-        cell_format["horizontalAlignment"] = horizontal_alignment.upper()
-
-    request_body = {
-        "requests": [
-            {
-                "repeatCell": {
-                    "range": {
-                        "sheetId": sheet_id
-                        # Would need to parse A1 notation to grid coords
-                    },
-                    "cell": {
-                        "userEnteredFormat": cell_format
-                    },
-                    "fields": "userEnteredFormat(" + ",".join(cell_format.keys()) + ")"
-                }
-            }
-        ]
-    }
-
-    result = sheets_service.spreadsheets().batchUpdate(
-        spreadsheet_id=spreadsheet_id,
-        body=request_body
-    ).execute()
-
-    return result
-
-
-@mcp.tool()
 def merge_cells(
     spreadsheet_id: str,
     sheet: str,
@@ -1211,6 +1128,106 @@ def merge_cells(
                         "endColumnIndex": end_col
                     },
                     "mergeType": merge_type
+                }
+            }
+        ]
+    }
+
+    result = sheets_service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body=request_body
+    ).execute()
+
+    return result
+
+
+@mcp.tool()
+def format_cells(
+    spreadsheet_id: str,
+    sheet: str,
+    range: str,
+    background_color: Optional[Dict[str, float]] = None,
+    text_color: Optional[Dict[str, float]] = None,
+    bold: Optional[bool] = None,
+    italic: Optional[bool] = None,
+    font_size: Optional[int] = None,
+    font_family: Optional[str] = None,
+    horizontal_alignment: Optional[str] = None,
+    ctx: Context = None
+) -> Dict[str, Any]:
+    """
+    Format cells in a range.
+
+    Args:
+        spreadsheet_id: The ID of the spreadsheet
+        sheet: The name of the sheet
+        range: Cell range in A1 notation
+        background_color: RGB dict for background color (e.g., {"red": 1.0, "green": 0.0, "blue": 0.0})
+        text_color: RGB dict for text color
+        bold: Make text bold
+        italic: Make text italic
+        font_size: Font size in points
+        font_family: Font family name (e.g., "Courier New", "Arial")
+        horizontal_alignment: LEFT, CENTER, or RIGHT
+
+    Returns:
+        Result of the formatting operation
+    """
+    sheets_service = ctx.request_context.lifespan_context.sheets_service
+
+    sheet_id = get_sheet_id(sheets_service, spreadsheet_id, sheet)
+    if sheet_id is None:
+        return {"error": f"Sheet '{sheet}' not found"}
+
+    coords = parse_a1_notation(range)
+    if coords is None:
+        return {"error": f"Invalid range format: {range}. Use A1 notation like 'A1:B10'"}
+
+    cell_format = {}
+    fields = []
+
+    if background_color:
+        cell_format["backgroundColor"] = background_color
+        fields.append("backgroundColor")
+
+    text_format = {}
+    if text_color:
+        text_format["foregroundColor"] = text_color
+    if bold is not None:
+        text_format["bold"] = bold
+    if italic is not None:
+        text_format["italic"] = italic
+    if font_size is not None:
+        text_format["fontSize"] = font_size
+    if font_family is not None:
+        text_format["fontFamily"] = font_family
+
+    if text_format:
+        cell_format["textFormat"] = text_format
+        fields.append("textFormat")
+
+    if horizontal_alignment:
+        cell_format["horizontalAlignment"] = horizontal_alignment.upper()
+        fields.append("horizontalAlignment")
+
+    if not fields:
+        return {"error": "No formatting options specified"}
+
+    request_body = {
+        "requests": [
+            {
+                "repeatCell": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": coords['startRowIndex'],
+                        "endRowIndex": coords['endRowIndex'],
+                        "startColumnIndex": coords['startColumnIndex'],
+                        "endColumnIndex": coords['endColumnIndex']
+                    },
+                    "cell": {
+                        "userEnteredFormat": cell_format
+                    },
+                    "fields": "userEnteredFormat(" + ",".join(fields) + ")"
                 }
             }
         ]
