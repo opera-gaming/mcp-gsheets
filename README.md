@@ -1,287 +1,170 @@
 # mcp-gsheets
 
-**Comprehensive MCP Server for Google Sheets API v4**
+A comprehensive MCP server for Google Sheets API v4 with full formatting, charts, validation, and automation support.
 
-A professional-grade Model Context Protocol (MCP) server that provides complete coverage of the Google Sheets API, including charts, formatting, conditional formatting, data validation, pivot tables, and much more.
+## Features
 
-[![PyPI version](https://badge.fury.io/py/mcp-gsheets.svg)](https://badge.fury.io/py/mcp-gsheets)
+- Full CRUD operations (read, write, update, append, clear)
+- Charts and visualizations (bar, column, line, pie, scatter, area)
+- Cell formatting (colors, fonts, bold, italic, alignment)
+- Conditional formatting and data validation
+- Merge/unmerge cells, find/replace with regex
+- Row/column operations, sheet management
+- 40+ tools covering the complete Google Sheets API
 
-## 🎯 Why mcp-gsheets?
+## Quick Start
 
-While other Google Sheets MCP servers focus on basic CRUD operations, **mcp-gsheets** provides the **complete API surface** including:
-
-- ✅ Full CRUD operations (read, write, update, append, clear)
-- ✅ **Charts and visualizations** (bar, column, line, pie, scatter, area charts)
-- ✅ **Cell formatting** (colors, fonts, alignment, number formats, borders)
-- ✅ **Conditional formatting** rules
-- ✅ **Data validation** (dropdowns, checkboxes, custom rules)
-- ✅ **Filtering and sorting**
-- ✅ **Merge/unmerge cells**
-- ✅ **Find and replace** (with regex support)
-- ✅ **Row/column operations** (add, delete, auto-resize)
-- ✅ **Sheet management** (create, delete, rename, copy)
-- ✅ **Spreadsheet management** (create, list, share)
-- ✅ Formula support
-- ✅ Batch operations for performance
-
-## 🚀 Quick Start
-
-### Installation
-
-The easiest way to use mcp-gsheets is with `uvx`:
-
-```bash
-uvx mcp-gsheets@latest
-```
-
-Or install via pip:
-
-```bash
-pip install mcp-gsheets
-```
-
-### Prerequisites: Google Cloud Setup
-
-Before using mcp-gsheets, you need to set up Google Cloud credentials:
+### 1. Google Cloud Setup
 
 1. **Create a Google Cloud Project**
-
    - Go to [Google Cloud Console](https://console.cloud.google.com/)
-   - Create a new project or select an existing one
+   - Create a new project
 
-2. **Enable Required APIs**
+2. **Enable APIs**
+   - Enable Google Sheets API
+   - Enable Google Drive API
 
-   - Enable the Google Sheets API
-   - Enable the Google Drive API
-
-3. **Create Service Account (Recommended)**
-
+3. **Create Service Account**
    - Go to IAM & Admin → Service Accounts
-   - Create a new service account
-   - Download the JSON key file
-   - Share your spreadsheets with the service account email
+   - Click "Create Service Account"
+   - Name it (e.g., "mcp-gsheets")
+   - Click "Create and Continue", then "Done"
+   - Click on the service account → Keys tab
+   - Add Key → Create new key → JSON
+   - Save the JSON file securely
 
-4. **Set Environment Variables**
+4. **Get the Service Account Email**
+   - Open the JSON file
+   - Copy the `client_email` value (e.g., `xxx@xxx.iam.gserviceaccount.com`)
+   - Share your Google Sheets with this email address (Editor permission)
+
+### 2. Install with Claude Code
+
+Run this command in your terminal (update the paths to match your setup):
 
 ```bash
-export SERVICE_ACCOUNT_PATH="/path/to/your/service-account-key.json"
-export DRIVE_FOLDER_ID="your_drive_folder_id"  # Optional
+claude mcp add --transport stdio sheets \
+  --env SERVICE_ACCOUNT_PATH=/path/to/your/service-account.json \
+  --env DRIVE_FOLDER_ID=your_optional_folder_id \
+  --scope user \
+  -- uvx mcp-gsheets
 ```
 
-### Using with Claude Desktop
+**Note:** The `DRIVE_FOLDER_ID` is optional. If provided, the server will only list spreadsheets in that folder.
 
-Add to your Claude Desktop MCP configuration (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
+To get your folder ID:
+1. Open the folder in Google Drive
+2. Copy the ID from the URL: `https://drive.google.com/drive/folders/FOLDER_ID_HERE`
 
-```json
-{
-  "mcpServers": {
-    "gsheets": {
-      "command": "uvx",
-      "args": ["mcp-gsheets@latest"],
-      "env": {
-        "SERVICE_ACCOUNT_PATH": "/path/to/your/service-account-key.json",
-        "DRIVE_FOLDER_ID": "your_folder_id"
-      }
-    }
-  }
-}
+### 3. Verify Installation
+
+Restart Claude Code and try:
+- "List my Google Spreadsheets"
+- "Create a new spreadsheet called 'Test'"
+- "Format cells A1:C1 to be bold with a blue background"
+
+## Development Setup
+
+### Install UV and Build Locally
+
+```bash
+# Install uv if you don't have it
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Clone the repository
+git clone <your-repo-url>
+cd mcp-gsheets
+
+# Build the package
+uv build
 ```
 
-## 📚 Available Tools
+### Run Locally for Development
 
-### Core Data Operations
+To run the MCP server locally and connect it to Claude Code:
 
-- `get_sheet_data` - Read data from a sheet
-- `get_sheet_formulas` - Get formulas from cells
-- `update_cells` - Update cell values
-- `batch_update_cells` - Update multiple ranges at once
-- `append_values` - Append rows to a sheet
-- `clear_range` - Clear cell values
-- `batch_clear_ranges` - Clear multiple ranges
-
-### Sheet Management
-
-- `list_sheets` - List all sheets in a spreadsheet
-- `create_sheet` - Create a new sheet tab
-- `rename_sheet` - Rename a sheet
-- `delete_sheet` - Delete a sheet
-- `copy_sheet` - Copy a sheet to another spreadsheet
-
-### Row/Column Operations
-
-- `add_rows` - Insert rows
-- `add_columns` - Insert columns
-- `delete_rows` - Delete rows
-- `delete_columns` - Delete columns
-- `auto_resize_dimensions` - Auto-fit rows/columns to content
-
-### Charts & Visualizations
-
-- `add_chart` - Create charts (BAR, COLUMN, LINE, PIE, SCATTER, AREA)
-- `delete_chart` - Remove charts
-
-### Cell Formatting
-
-- `format_cells` - Set colors, fonts, alignment, bold, italic
-- `merge_cells` - Merge cell ranges
-- `unmerge_cells` - Unmerge cells
-- `set_number_format` - Format numbers, currency, dates, percentages
-
-### Conditional Formatting
-
-- `add_conditional_format_rule` - Add conditional formatting rules with custom colors
-
-### Data Validation
-
-- `add_data_validation` - Add dropdowns, checkboxes, and validation rules
-
-### Filtering & Sorting
-
-- `sort_range` - Sort data by column
-
-### Advanced Operations
-
-- `find_replace` - Find and replace text (with regex support)
-
-### Spreadsheet Management
-
-- `create_spreadsheet` - Create new spreadsheets
-- `list_spreadsheets` - List all spreadsheets
-- `share_spreadsheet` - Share spreadsheets with users
-
-## 💡 Usage Examples
-
-### Example 1: Create and Format a Report
-
-```python
-# Create a new spreadsheet
-create_spreadsheet(title="Q4 Sales Report")
-
-# Add data
-update_cells(
-    spreadsheet_id="...",
-    sheet="Sheet1",
-    range="A1:C1",
-    data=[["Product", "Sales", "Growth"]]
-)
-
-# Format header row
-format_cells(
-    spreadsheet_id="...",
-    sheet="Sheet1",
-    range="A1:C1",
-    background_color={"red": 0.2, "green": 0.6, "blue": 0.9},
-    bold=True,
-    horizontal_alignment="CENTER"
-)
-
-# Add a chart
-add_chart(
-    spreadsheet_id="...",
-    sheet="Sheet1",
-    chart_type="COLUMN",
-    data_range="A1:C10",
-    title="Q4 Sales by Product"
-)
+```bash
+claude mcp add --transport stdio sheets \
+  --env SERVICE_ACCOUNT_PATH=/path/to/your/service-account.json \
+  --env DRIVE_FOLDER_ID=your_optional_folder_id \
+  --scope user \
+  -- uvx --from . mcp-gsheets
 ```
 
-### Example 2: Data Validation
+**Note:** The `--from .` tells uvx to use your local development version.
 
-```python
-# Add dropdown validation
-add_data_validation(
-    spreadsheet_id="...",
-    sheet="Sheet1",
-    start_row=1,
-    end_row=100,
-    start_col=3,
-    end_col=4,
-    validation_type="ONE_OF_LIST",
-    values=["Pending", "In Progress", "Complete"]
-)
-```
+### Development Workflow
 
-### Example 3: Conditional Formatting
+If you're actively developing and testing:
 
-```python
-# Highlight cells above threshold
-add_conditional_format_rule(
-    spreadsheet_id="...",
-    sheet="Sheet1",
-    start_row=1,
-    end_row=100,
-    start_col=2,
-    end_col=3,
-    condition_type="NUMBER_GREATER",
-    condition_values=["1000"],
-    background_color={"red": 0.0, "green": 0.9, "blue": 0.0}
-)
-```
+1. Make your code changes
+2. Clean the UV cache: `uv clean --force`
+3. Rebuild: `uv build`
+4. Reload the MCP in Claude Code: `/mcp` command or restart Claude Code
+5. Test your changes
 
-### Example 4: Find and Replace
+**Important:** When testing changes in Claude Code, you MUST run `uv clean --force` and rebuild before reloading the MCP server, otherwise Claude will use the cached version.
 
-```python
-# Replace all occurrences with regex
-find_replace(
-    spreadsheet_id="...",
-    sheet="Sheet1",
-    find=r"(\d{3})-(\d{3})-(\d{4})",
-    replacement=r"($1) $2-$3",
-    search_by_regex=True
-)
-```
+## Available Tools (40+)
 
-## 🔧 Authentication Options
+**Data Operations:** get_sheet_data, update_cells, batch_update_cells, append_values, clear_range, get_sheet_formulas
 
-### 1. Service Account (Recommended for Production)
+**Sheet Management:** list_sheets, create_sheet, rename_sheet, delete_sheet, copy_sheet
 
+**Formatting:** format_cells, merge_cells, unmerge_cells, set_number_format
+
+**Charts:** add_chart, delete_chart
+
+**Validation:** add_data_validation, add_conditional_format_rule
+
+**Operations:** sort_range, find_replace, add_rows, add_columns, delete_rows, delete_columns, auto_resize_dimensions
+
+**Spreadsheet Management:** create_spreadsheet, list_spreadsheets, share_spreadsheet
+
+## Authentication Methods
+
+### Service Account (Recommended)
 ```bash
 export SERVICE_ACCOUNT_PATH="/path/to/service-account.json"
+export DRIVE_FOLDER_ID="optional_folder_id"
 ```
 
-### 2. OAuth Flow (Interactive)
-
+### OAuth 2.0 Flow
 ```bash
 export CREDENTIALS_PATH="/path/to/credentials.json"
 export TOKEN_PATH="/path/to/token.json"
 ```
 
-### 3. Application Default Credentials
+### Application Default Credentials
+```bash
+gcloud auth application-default login
+```
 
-Uses gcloud CLI authentication automatically.
-
-### 4. Direct Credential Injection
-
+### Direct Injection
 ```bash
 export CREDENTIALS_CONFIG="base64_encoded_service_account_json"
 ```
 
-## 🏗️ Architecture
+## Troubleshooting
 
-mcp-gsheets is built with:
+**"Permission denied" accessing spreadsheet:**
+- Share the spreadsheet with your service account email
+- Grant "Editor" permission (not just "Viewer")
 
-- **[FastMCP](https://gofastmcp.com)** - High-level MCP framework for Python
-- **Google Sheets API v4** - Complete API coverage
-- **Google Drive API v3** - For spreadsheet management
+**"Authentication failed":**
+- Verify your JSON key file path is correct
+- Ensure APIs are enabled in Google Cloud Console
 
-## 📊 Tool Count
+**Tools not showing up:**
+- Restart Claude Code completely
+- Verify your MCP configuration with: `claude mcp list`
 
-**40+ tools** covering the complete Google Sheets API surface area
+## Links
 
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## 📄 License
-
-MIT License
-
-## 🔗 Links
-
-- [Google Sheets API Documentation](https://developers.google.com/sheets/api)
-- [FastMCP Documentation](https://gofastmcp.com)
+- [Google Sheets API](https://developers.google.com/sheets/api)
 - [MCP Specification](https://modelcontextprotocol.io)
+- [FastMCP](https://gofastmcp.com)
 
-## 🙏 Acknowledgments
+## License
 
-Built with inspiration from [mcp-google-sheets](https://github.com/xing5/mcp-google-sheets) by Xing Wu, extending it with comprehensive API coverage for professional use.
+MIT
