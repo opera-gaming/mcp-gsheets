@@ -951,69 +951,103 @@ def add_chart(
     if coords is None:
         return {"error": f"Invalid range format: {data_range}. Use A1 notation like 'A1:B10'"}
 
-    num_columns = coords['endColumnIndex'] - coords['startColumnIndex']
+    chart_spec = {"title": title or "Chart"}
 
-    series = []
-    for i in range(1, num_columns):
-        series.append({
-            "series": {
+    if chart_type.upper() == "PIE":
+        domain_source = {
+            "sheetId": sheet_id,
+            "startRowIndex": coords['startRowIndex'],
+            "endRowIndex": coords['endRowIndex'],
+            "startColumnIndex": coords['startColumnIndex'],
+            "endColumnIndex": coords['startColumnIndex'] + 1
+        }
+
+        series_source = {
+            "sheetId": sheet_id,
+            "startRowIndex": coords['startRowIndex'],
+            "endRowIndex": coords['endRowIndex'],
+            "startColumnIndex": coords['startColumnIndex'] + 1,
+            "endColumnIndex": coords['startColumnIndex'] + 2
+        }
+
+        if use_first_row_as_headers:
+            domain_source["startRowIndex"] += 1
+            series_source["startRowIndex"] += 1
+
+        chart_spec["pieChart"] = {
+            "legendPosition": "RIGHT_LEGEND",
+            "domain": {
                 "sourceRange": {
-                    "sources": [
-                        {
-                            "sheetId": sheet_id,
-                            "startRowIndex": coords['startRowIndex'],
-                            "endRowIndex": coords['endRowIndex'],
-                            "startColumnIndex": coords['startColumnIndex'] + i,
-                            "endColumnIndex": coords['startColumnIndex'] + i + 1
-                        }
-                    ]
+                    "sources": [domain_source]
                 }
             },
-            "targetAxis": "LEFT_AXIS"
-        })
+            "series": {
+                "sourceRange": {
+                    "sources": [series_source]
+                }
+            }
+        }
+    else:
+        num_columns = coords['endColumnIndex'] - coords['startColumnIndex']
 
-    left_axis = {"position": "LEFT_AXIS"}
-    if y_axis_min is not None or y_axis_max is not None:
-        left_axis["viewWindowOptions"] = {}
-        if y_axis_min is not None:
-            left_axis["viewWindowOptions"]["viewWindowMin"] = y_axis_min
-        if y_axis_max is not None:
-            left_axis["viewWindowOptions"]["viewWindowMax"] = y_axis_max
-
-    basic_chart = {
-        "chartType": chart_type.upper(),
-        "legendPosition": "RIGHT_LEGEND",
-        "axis": [
-            {"position": "BOTTOM_AXIS"},
-            left_axis
-        ],
-        "domains": [
-            {
-                "domain": {
+        series = []
+        for i in range(1, num_columns):
+            series.append({
+                "series": {
                     "sourceRange": {
                         "sources": [
                             {
                                 "sheetId": sheet_id,
                                 "startRowIndex": coords['startRowIndex'],
                                 "endRowIndex": coords['endRowIndex'],
-                                "startColumnIndex": coords['startColumnIndex'],
-                                "endColumnIndex": coords['startColumnIndex'] + 1
+                                "startColumnIndex": coords['startColumnIndex'] + i,
+                                "endColumnIndex": coords['startColumnIndex'] + i + 1
                             }
                         ]
                     }
+                },
+                "targetAxis": "LEFT_AXIS"
+            })
+
+        left_axis = {"position": "LEFT_AXIS"}
+        if y_axis_min is not None or y_axis_max is not None:
+            left_axis["viewWindowOptions"] = {}
+            if y_axis_min is not None:
+                left_axis["viewWindowOptions"]["viewWindowMin"] = y_axis_min
+            if y_axis_max is not None:
+                left_axis["viewWindowOptions"]["viewWindowMax"] = y_axis_max
+
+        basic_chart = {
+            "chartType": chart_type.upper(),
+            "legendPosition": "RIGHT_LEGEND",
+            "axis": [
+                {"position": "BOTTOM_AXIS"},
+                left_axis
+            ],
+            "domains": [
+                {
+                    "domain": {
+                        "sourceRange": {
+                            "sources": [
+                                {
+                                    "sheetId": sheet_id,
+                                    "startRowIndex": coords['startRowIndex'],
+                                    "endRowIndex": coords['endRowIndex'],
+                                    "startColumnIndex": coords['startColumnIndex'],
+                                    "endColumnIndex": coords['startColumnIndex'] + 1
+                                }
+                            ]
+                        }
+                    }
                 }
-            }
-        ],
-        "series": series
-    }
+            ],
+            "series": series
+        }
 
-    if use_first_row_as_headers:
-        basic_chart["headerCount"] = 1
+        if use_first_row_as_headers:
+            basic_chart["headerCount"] = 1
 
-    chart_spec = {
-        "title": title or "Chart",
-        "basicChart": basic_chart
-    }
+        chart_spec["basicChart"] = basic_chart
 
     request_body = {
         "requests": [
@@ -1141,6 +1175,14 @@ def merge_cells(
     return result
 
 
+def clamp_rgb_color(color: Dict[str, float]) -> Dict[str, float]:
+    """Clamp RGB color values to 0.0-1.0 range"""
+    return {
+        key: max(0.0, min(1.0, value))
+        for key, value in color.items()
+    }
+
+
 @mcp.tool()
 def format_cells(
     spreadsheet_id: str,
@@ -1161,7 +1203,7 @@ def format_cells(
     Args:
         spreadsheet_id: The ID of the spreadsheet
         sheet: The name of the sheet
-        range: Cell range in A1 notation
+        range: Cell range in A1 notation (or single cell like 'A1')
         background_color: RGB dict for background color (e.g., {"red": 1.0, "green": 0.0, "blue": 0.0})
         text_color: RGB dict for text color
         bold: Make text bold
@@ -1179,20 +1221,24 @@ def format_cells(
     if sheet_id is None:
         return {"error": f"Sheet '{sheet}' not found"}
 
+    import re
+    if re.match(r'^[A-Z]+\d+$', range):
+        range = f"{range}:{range}"
+
     coords = parse_a1_notation(range)
     if coords is None:
-        return {"error": f"Invalid range format: {range}. Use A1 notation like 'A1:B10'"}
+        return {"error": f"Invalid range format: {range}. Use A1 notation like 'A1:B10' or 'A1'"}
 
     cell_format = {}
     fields = []
 
     if background_color:
-        cell_format["backgroundColor"] = background_color
+        cell_format["backgroundColor"] = clamp_rgb_color(background_color)
         fields.append("backgroundColor")
 
     text_format = {}
     if text_color:
-        text_format["foregroundColor"] = text_color
+        text_format["foregroundColor"] = clamp_rgb_color(text_color)
     if bold is not None:
         text_format["bold"] = bold
     if italic is not None:
@@ -1393,7 +1439,7 @@ def add_data_validation(
         start_col: Start column index (0-based)
         end_col: End column index (exclusive)
         validation_type: ONE_OF_LIST, BOOLEAN, NUMBER_BETWEEN, etc.
-        values: List of valid values (for ONE_OF_LIST)
+        values: List of valid values (for ONE_OF_LIST or NUMBER_BETWEEN min/max)
         strict: Reject invalid input
 
     Returns:
@@ -1413,8 +1459,13 @@ def add_data_validation(
         "showCustomUi": True
     }
 
-    if validation_type == "ONE_OF_LIST" and values:
+    if validation_type.upper() == "ONE_OF_LIST" and values:
         validation_rule["condition"]["values"] = [{"userEnteredValue": v} for v in values]
+    elif validation_type.upper() == "NUMBER_BETWEEN" and values and len(values) >= 2:
+        validation_rule["condition"]["values"] = [
+            {"userEnteredValue": values[0]},
+            {"userEnteredValue": values[1]}
+        ]
 
     request_body = {
         "requests": [
@@ -1485,9 +1536,9 @@ def add_conditional_format_rule(
 
     cell_format = {}
     if background_color:
-        cell_format["backgroundColor"] = background_color
+        cell_format["backgroundColor"] = clamp_rgb_color(background_color)
     if text_color:
-        cell_format["textFormat"] = {"foregroundColor": text_color}
+        cell_format["textFormat"] = {"foregroundColor": clamp_rgb_color(text_color)}
 
     boolean_rule = {
         "condition": {

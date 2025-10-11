@@ -14,7 +14,7 @@ A comprehensive MCP server for Google Sheets API v4 with full formatting, charts
 
 ## Quick Start
 
-### 1. Google Cloud Setup
+### 1. Google Cloud Setup (OAuth - Recommended)
 
 1. **Create a Google Cloud Project**
    - Go to [Google Cloud Console](https://console.cloud.google.com/)
@@ -24,37 +24,67 @@ A comprehensive MCP server for Google Sheets API v4 with full formatting, charts
    - Enable Google Sheets API
    - Enable Google Drive API
 
-3. **Create Service Account**
-   - Go to IAM & Admin → Service Accounts
-   - Click "Create Service Account"
-   - Name it (e.g., "mcp-gsheets")
-   - Click "Create and Continue", then "Done"
-   - Click on the service account → Keys tab
-   - Add Key → Create new key → JSON
-   - Save the JSON file securely
+3. **Configure OAuth 2.0**
+   - Go to APIs & Services → OAuth consent screen
+   - Choose "External" user type
+   - Fill in the required fields (app name, user support email, developer email)
+   - Add scopes: `https://www.googleapis.com/auth/spreadsheets` and `https://www.googleapis.com/auth/drive.file`
+   - Add your email as a test user
+   - Go to APIs & Services → Credentials
+   - Click "Create Credentials" → "OAuth client ID"
+   - Choose "Desktop app" as application type
+   - Name it (e.g., "mcp-gsheets-oauth")
+   - Download the JSON file and save it as `credentials.json`
 
-4. **Get the Service Account Email**
-   - Open the JSON file
-   - Copy the `client_email` value (e.g., `xxx@xxx.iam.gserviceaccount.com`)
-   - Share your Google Sheets with this email address (Editor permission)
+**Why OAuth?** Runs under your own Google account with automatic access to all your spreadsheets. No need to share files individually. **Required for creating new spreadsheets** (service accounts have no Drive quota).
+
+<details>
+<summary><b>Alternative: Service Account Setup</b> (for automation/CI/CD only)</summary>
+
+Only follow these steps if you need service account authentication instead of OAuth:
+
+1. Go to IAM & Admin → Service Accounts
+2. Click "Create Service Account"
+3. Name it (e.g., "mcp-gsheets")
+4. Click "Create and Continue", then "Done"
+5. Click on the service account → Keys tab
+6. Add Key → Create new key → JSON
+7. Save the JSON file securely
+8. Share each spreadsheet with the service account email (found in JSON as `client_email`)
+
+**Limitations:** Cannot create new spreadsheets. Must share each file manually.
+</details>
 
 ### 2. Install with Claude Code
 
-Run this command in your terminal (update the paths to match your setup):
+**Using OAuth (Recommended):**
 
 ```bash
 claude mcp add --transport stdio sheets \
-  --env SERVICE_ACCOUNT_PATH=/path/to/your/service-account.json \
+  --env CREDENTIALS_PATH=/path/to/credentials.json \
+  --env TOKEN_PATH=/path/to/token.json \
   --env DRIVE_FOLDER_ID=your_optional_folder_id \
   --scope user \
   -- uvx mcp-gsheets
 ```
 
-**Note:** The `DRIVE_FOLDER_ID` is optional. If provided, the server will only list spreadsheets in that folder.
+On first run, the server will open a browser window for you to authorize access. After authorization, a `token.json` file will be created and the token will refresh automatically.
 
-To get your folder ID:
-1. Open the folder in Google Drive
-2. Copy the ID from the URL: `https://drive.google.com/drive/folders/FOLDER_ID_HERE`
+**Using Service Account (Alternative):**
+
+```bash
+claude mcp add --transport stdio sheets \
+  --env SERVICE_ACCOUNT_PATH=/path/to/service-account.json \
+  --env DRIVE_FOLDER_ID=your_optional_folder_id \
+  --scope user \
+  -- uvx mcp-gsheets
+```
+
+With a service account, you'll need to share each spreadsheet with the service account email (found in the JSON file as `client_email`). **Note:** Service accounts cannot create new spreadsheets due to Drive quota limitations - use OAuth if you need to create files.
+
+**Notes:**
+- The `DRIVE_FOLDER_ID` is optional. If provided, the server will only list spreadsheets in that folder.
+- To get your folder ID: Open the folder in Google Drive and copy the ID from the URL: `https://drive.google.com/drive/folders/FOLDER_ID_HERE`
 
 ### 3. Verify Installation
 
@@ -123,27 +153,38 @@ If you're actively developing and testing:
 
 ## Authentication Methods
 
-### Service Account (Recommended)
+The server supports multiple authentication methods, checked in this order:
+
+### 1. OAuth 2.0 Flow (Recommended)
+```bash
+export CREDENTIALS_PATH="/path/to/credentials.json"
+export TOKEN_PATH="/path/to/token.json"
+export DRIVE_FOLDER_ID="optional_folder_id"
+```
+
+Best for personal use. Runs under your Google account with automatic access to all your spreadsheets. On first run, opens a browser for authorization and saves a refresh token. **Required for creating new spreadsheets.**
+
+### 2. Service Account
 ```bash
 export SERVICE_ACCOUNT_PATH="/path/to/service-account.json"
 export DRIVE_FOLDER_ID="optional_folder_id"
 ```
 
-### OAuth 2.0 Flow
-```bash
-export CREDENTIALS_PATH="/path/to/credentials.json"
-export TOKEN_PATH="/path/to/token.json"
-```
+Best for automation and CI/CD. Requires sharing each spreadsheet with the service account email. **Cannot create new spreadsheets** (service accounts have no Drive quota).
 
-### Application Default Credentials
+### 3. Application Default Credentials
 ```bash
 gcloud auth application-default login
 ```
 
-### Direct Injection
+Uses gcloud CLI credentials if available.
+
+### 4. Direct Injection
 ```bash
 export CREDENTIALS_CONFIG="base64_encoded_service_account_json"
 ```
+
+For containerized environments where file paths are impractical.
 
 ## Troubleshooting
 
