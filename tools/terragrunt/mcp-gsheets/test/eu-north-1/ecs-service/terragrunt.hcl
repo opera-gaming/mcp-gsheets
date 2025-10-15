@@ -120,6 +120,10 @@ inputs = merge(local, {
           "valueFrom" : "${local.app_secrets}:JWT_SECRET_KEY::"
         },
         {
+          "name" : "ENCRYPTION_KEY",
+          "valueFrom" : "${local.app_secrets}:ENCRYPTION_KEY::"
+        },
+        {
           "name" : "GOOGLE_CLIENT_ID",
           "valueFrom" : "${local.app_secrets}:GOOGLE_CLIENT_ID::"
         },
