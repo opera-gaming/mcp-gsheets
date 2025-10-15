@@ -61,4 +61,5 @@ class OAuthCredential(Base):
             'client_id': self.client_id,
             'client_secret': self.client_secret,
             'scopes': json.loads(self.scopes) if self.scopes else [],
+            'expiry': self.expiry,
         }

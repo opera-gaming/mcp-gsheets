@@ -6,14 +6,20 @@ Comprehensive Google Sheets MCP server covering the complete API v4 surface
 
 import base64
 import os
+import logging
 from typing import List, Dict, Any, Optional, Union
 import json
 from dataclasses import dataclass
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+from contextvars import ContextVar
 
 # MCP imports
 from fastmcp import FastMCP, Context
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Google API imports
 from google.oauth2.credentials import Credentials
@@ -30,6 +36,9 @@ TOKEN_PATH = os.environ.get('TOKEN_PATH', 'token.json')
 CREDENTIALS_PATH = os.environ.get('CREDENTIALS_PATH', 'credentials.json')
 SERVICE_ACCOUNT_PATH = os.environ.get('SERVICE_ACCOUNT_PATH', 'service_account.json')
 DRIVE_FOLDER_ID = os.environ.get('DRIVE_FOLDER_ID', '')
+
+# Per-request context storage for HTTP MCP server
+request_context_var: ContextVar[Optional['SpreadsheetContext']] = ContextVar('request_context', default=None)
 
 @dataclass
 class SpreadsheetContext:
@@ -112,7 +121,6 @@ async def spreadsheet_lifespan(server: FastMCP) -> AsyncIterator[SpreadsheetCont
 # Initialize the MCP server
 mcp = FastMCP(
     "mcp-gsheets",
-    dependencies=["google-auth", "google-auth-oauthlib", "google-api-python-client"],
     lifespan=spreadsheet_lifespan
 )
 
@@ -131,6 +139,17 @@ async def health_check(request):
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
+
+def get_context(ctx: Context) -> SpreadsheetContext:
+    """Get spreadsheet context, preferring per-request auth over lifespan auth"""
+    # Try to get per-request context from contextvar first (set by middleware)
+    per_request_ctx = request_context_var.get()
+    if per_request_ctx is not None:
+        logger.info("Using per-request context from middleware")
+        return per_request_ctx
+    # Fall back to lifespan context
+    logger.info("Using lifespan context (fallback)")
+    return ctx.request_context.lifespan_context
 
 def get_sheet_id(sheets_service: Any, spreadsheet_id: str, sheet_name: str) -> Optional[int]:
     """Get the sheet ID from sheet name"""
@@ -189,7 +208,8 @@ def get_sheet_data(
     Returns:
         Sheet data with values
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     if range:
         full_range = f"{sheet}!{range}"
@@ -237,7 +257,8 @@ def get_sheet_formulas(
     Returns:
         2D array of formulas
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     if range:
         full_range = f"{sheet}!{range}"
@@ -273,7 +294,8 @@ def update_cells(
     Returns:
         Result of the update operation
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     full_range = f"{sheet}!{range}"
 
@@ -310,7 +332,8 @@ def batch_update_cells(
     Returns:
         Result of the batch update operation
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     data = []
     for range_str, values in ranges.items():
@@ -353,7 +376,8 @@ def append_values(
     Returns:
         Result of the append operation
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     full_range = f"{sheet}!{range}"
 
@@ -390,7 +414,8 @@ def clear_range(
     Returns:
         Result of the clear operation
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     full_range = f"{sheet}!{range}"
 
@@ -421,7 +446,8 @@ def batch_clear_ranges(
     Returns:
         Result of the batch clear operation
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     full_ranges = [f"{sheet}!{r}" for r in ranges]
 
@@ -452,7 +478,8 @@ def list_sheets(spreadsheet_id: str, ctx: Context = None) -> List[str]:
     Returns:
         List of sheet names
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     spreadsheet = sheets_service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
     sheet_names = [sheet['properties']['title'] for sheet in spreadsheet['sheets']]
@@ -480,7 +507,8 @@ def create_sheet(
     Returns:
         Information about the newly created sheet
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     request_body = {
         "requests": [
@@ -531,7 +559,8 @@ def rename_sheet(
     Returns:
         Result of the operation
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     sheet_id = get_sheet_id(sheets_service, spreadsheet_id, sheet)
     if sheet_id is None:
@@ -575,7 +604,8 @@ def delete_sheet(
     Returns:
         Result of the delete operation
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     sheet_id = get_sheet_id(sheets_service, spreadsheet_id, sheet)
     if sheet_id is None:
@@ -619,7 +649,8 @@ def copy_sheet(
     Returns:
         Result of the operation
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     src_sheet_id = get_sheet_id(sheets_service, src_spreadsheet, src_sheet)
     if src_sheet_id is None:
@@ -687,7 +718,8 @@ def add_rows(
     Returns:
         Result of the operation
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     sheet_id = get_sheet_id(sheets_service, spreadsheet_id, sheet)
     if sheet_id is None:
@@ -737,7 +769,8 @@ def add_columns(
     Returns:
         Result of the operation
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     sheet_id = get_sheet_id(sheets_service, spreadsheet_id, sheet)
     if sheet_id is None:
@@ -787,7 +820,8 @@ def delete_rows(
     Returns:
         Result of the operation
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     sheet_id = get_sheet_id(sheets_service, spreadsheet_id, sheet)
     if sheet_id is None:
@@ -836,7 +870,8 @@ def delete_columns(
     Returns:
         Result of the operation
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     sheet_id = get_sheet_id(sheets_service, spreadsheet_id, sheet)
     if sheet_id is None:
@@ -887,7 +922,8 @@ def auto_resize_dimensions(
     Returns:
         Result of the operation
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     sheet_id = get_sheet_id(sheets_service, spreadsheet_id, sheet)
     if sheet_id is None:
@@ -952,7 +988,8 @@ def add_chart(
     Returns:
         Result including chart ID
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     sheet_id = get_sheet_id(sheets_service, spreadsheet_id, sheet)
     if sheet_id is None:
@@ -1105,7 +1142,8 @@ def delete_chart(
     Returns:
         Result of the deletion
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     request_body = {
         "requests": [
@@ -1155,7 +1193,8 @@ def merge_cells(
     Returns:
         Result of the merge operation
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     sheet_id = get_sheet_id(sheets_service, spreadsheet_id, sheet)
     if sheet_id is None:
@@ -1226,7 +1265,8 @@ def format_cells(
     Returns:
         Result of the formatting operation
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     sheet_id = get_sheet_id(sheets_service, spreadsheet_id, sheet)
     if sheet_id is None:
@@ -1322,7 +1362,8 @@ def unmerge_cells(
     Returns:
         Result of the unmerge operation
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     sheet_id = get_sheet_id(sheets_service, spreadsheet_id, sheet)
     if sheet_id is None:
@@ -1380,7 +1421,8 @@ def set_number_format(
     Returns:
         Result of the formatting operation
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     sheet_id = get_sheet_id(sheets_service, spreadsheet_id, sheet)
     if sheet_id is None:
@@ -1456,7 +1498,8 @@ def add_data_validation(
     Returns:
         Result of the operation
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     sheet_id = get_sheet_id(sheets_service, spreadsheet_id, sheet)
     if sheet_id is None:
@@ -1539,7 +1582,8 @@ def add_conditional_format_rule(
     Returns:
         Result of the operation
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     sheet_id = get_sheet_id(sheets_service, spreadsheet_id, sheet)
     if sheet_id is None:
@@ -1621,7 +1665,8 @@ def sort_range(
     Returns:
         Result of the sort operation
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     sheet_id = get_sheet_id(sheets_service, spreadsheet_id, sheet)
     if sheet_id is None:
@@ -1687,7 +1732,8 @@ def find_replace(
     Returns:
         Result with number of replacements made
     """
-    sheets_service = ctx.request_context.lifespan_context.sheets_service
+    context = get_context(ctx)
+    sheets_service = context.sheets_service
 
     find_replace_spec = {
         "find": find,
@@ -1737,8 +1783,9 @@ def create_spreadsheet(
     Returns:
         Information about the newly created spreadsheet including its ID
     """
-    drive_service = ctx.request_context.lifespan_context.drive_service
-    folder_id = ctx.request_context.lifespan_context.folder_id
+    context = get_context(ctx)
+    drive_service = context.drive_service
+    folder_id = context.folder_id
 
     file_body = {
         'name': title,
@@ -1771,8 +1818,9 @@ def list_spreadsheets(ctx: Context = None) -> List[Dict[str, str]]:
     Returns:
         List of spreadsheets with their ID and title
     """
-    drive_service = ctx.request_context.lifespan_context.drive_service
-    folder_id = ctx.request_context.lifespan_context.folder_id
+    context = get_context(ctx)
+    drive_service = context.drive_service
+    folder_id = context.folder_id
 
     query = "mimeType='application/vnd.google-apps.spreadsheet'"
 
@@ -1811,7 +1859,8 @@ def share_spreadsheet(
     Returns:
         Dictionary with lists of successes and failures
     """
-    drive_service = ctx.request_context.lifespan_context.drive_service
+    context = get_context(ctx)
+    drive_service = context.drive_service
     successes = []
     failures = []
 

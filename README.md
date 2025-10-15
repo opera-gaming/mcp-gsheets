@@ -16,9 +16,9 @@ A comprehensive MCP server for Google Sheets API v4 with full formatting, charts
 
 ## Deployment Options
 
-### Option 1: Multi-User Web OAuth + JWT (Recommended for Teams)
+### Option 1: Multi-User Hosted MCP Server (Current Implementation)
 
-Run as a web service with centralized authentication. Users authorize once via web UI and receive a JWT token to use with their MCP clients.
+Run as a hosted MCP server with web-based OAuth authentication. Users authorize once via web UI and receive a JWT token to use with their MCP clients.
 
 **Quick Start:**
 
@@ -41,6 +41,7 @@ Edit `.env` and add your Google OAuth credentials:
 ```bash
 GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your-client-secret
+BASE_URL=http://localhost:8080
 
 # Generate secrets:
 python -c "import secrets; print('JWT_SECRET_KEY=' + secrets.token_urlsafe(32))"
@@ -56,30 +57,30 @@ docker-compose up -d
    - Open http://localhost:8080
    - Click "Sign in with Google"
    - Authorize access to Google Sheets
-   - Copy your JWT token
+   - Copy your JWT token from the dashboard
 
 5. **Configure MCP Client:**
 
-Add to your MCP client configuration:
+Create or update `.mcp.json` in your project:
 ```json
 {
-  "mcp-gsheets": {
-    "command": "curl",
-    "args": [
-      "-X", "POST",
-      "http://localhost:8081/mcp/v1/call",
-      "-H", "Authorization: Bearer YOUR_JWT_TOKEN_HERE",
-      "-H", "Content-Type: application/json",
-      "-d", "@-"
-    ]
+  "mcpServers": {
+    "mcp-gsheets": {
+      "type": "http",
+      "url": "http://localhost:8080/mcp/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_JWT_TOKEN_HERE"
+      }
+    }
   }
 }
 ```
 
 **Architecture:**
-- Web Service (port 8080): OAuth flow and JWT token generation
-- MCP Server (port 8081): HTTP API with JWT validation
-- PostgreSQL: Encrypted credential storage
+- Web Service (port 8080): OAuth flow, JWT token generation, and MCP endpoint
+- PostgreSQL: Encrypted credential storage (refresh tokens, access tokens)
+- FastMCP: HTTP-based MCP server with JWT authentication middleware
+- Per-request authentication: Each MCP call uses the user's stored Google credentials
 
 ### Option 2: Single-User Local OAuth (Quick Start)
 

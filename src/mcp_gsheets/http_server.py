@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import os
 import json
+import logging
 from typing import Any, Optional
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
@@ -8,6 +9,10 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 import jwt
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 from fastapi import FastAPI, Request, HTTPException, Header, Depends
 from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -21,7 +26,7 @@ from sqlalchemy.orm import Session
 import google.auth
 
 from .auth import get_credentials_from_jwt, validate_jwt_token
-from .server import mcp as sheets_mcp
+from .server import mcp as sheets_mcp, SpreadsheetContext, request_context_var
 from .db import get_db, engine, Base
 from .models import User, OAuthCredential
 
@@ -43,12 +48,53 @@ JWT_EXPIRATION_DAYS = 30
 
 mcp_app = sheets_mcp.http_app()
 
+class MCPAuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path.startswith("/mcp"):
+            logger.info(f"MCP request to {request.url.path}")
+            auth_header = request.headers.get("authorization")
+            if auth_header:
+                jwt_token = await get_jwt_from_header(auth_header)
+                if jwt_token:
+                    logger.info("JWT token found, retrieving credentials")
+                    creds = get_credentials_from_jwt(jwt_token)
+                    if creds:
+                        logger.info("Building Google API services with user credentials")
+                        sheets_service = build('sheets', 'v4', credentials=creds)
+                        drive_service = build('drive', 'v3', credentials=creds)
+
+                        context = SpreadsheetContext(
+                            sheets_service=sheets_service,
+                            drive_service=drive_service,
+                            folder_id=None
+                        )
+
+                        # Set the context in contextvar for tool access
+                        request.state.mcp_context = context
+                        request_context_var.set(context)
+                        logger.info("Per-request context set in contextvar")
+                    else:
+                        logger.warning("Failed to get credentials from JWT")
+                else:
+                    logger.warning("No JWT token in authorization header")
+            else:
+                logger.warning("No authorization header found")
+
+        response = await call_next(request)
+
+        # Clean up contextvar after request
+        if request.url.path.startswith("/mcp"):
+            request_context_var.set(None)
+
+        return response
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with mcp_app.lifespan(app):
         yield
 
 app = FastAPI(title="MCP Google Sheets Server", lifespan=lifespan)
+app.add_middleware(MCPAuthMiddleware)
 
 templates = Jinja2Templates(directory="templates")
 
@@ -83,6 +129,15 @@ def get_flow():
 
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
+    token = request.cookies.get("mcp_jwt_token")
+
+    if token:
+        try:
+            jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+            return RedirectResponse(url="/dashboard")
+        except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+            pass
+
     return templates.TemplateResponse("index.html", {
         "request": request,
         "base_url": BASE_URL
@@ -147,15 +202,28 @@ async def auth_callback(request: Request, code: str, db: Session = Depends(get_d
 
     jwt_token = create_jwt_token(user.id, user.email)
 
-    return RedirectResponse(url=f"/dashboard?token={jwt_token}")
+    response = RedirectResponse(url="/dashboard")
+    response.set_cookie(
+        key="mcp_jwt_token",
+        value=jwt_token,
+        max_age=JWT_EXPIRATION_DAYS * 24 * 60 * 60,
+        httponly=True,
+        samesite="lax"
+    )
+    return response
 
 @app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard(request: Request, token: str):
+async def dashboard(request: Request):
+    token = request.cookies.get("mcp_jwt_token")
+
+    if not token:
+        return RedirectResponse(url="/")
+
     try:
         payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
         email = payload.get('email')
 
-        mcp_url = f"{BASE_URL}/mcp"
+        mcp_url = f"{BASE_URL}/mcp/mcp"
 
         return templates.TemplateResponse("dashboard.html", {
             "request": request,
@@ -164,9 +232,19 @@ async def dashboard(request: Request, token: str):
             "mcp_url": mcp_url
         })
     except jwt.ExpiredSignatureError:
-        return HTMLResponse("<h1>Token expired. Please re-authenticate.</h1>")
+        response = RedirectResponse(url="/")
+        response.delete_cookie("mcp_jwt_token")
+        return response
     except jwt.InvalidTokenError:
-        return HTMLResponse("<h1>Invalid token.</h1>")
+        response = RedirectResponse(url="/")
+        response.delete_cookie("mcp_jwt_token")
+        return response
+
+@app.get("/logout")
+async def logout():
+    response = RedirectResponse(url="/")
+    response.delete_cookie("mcp_jwt_token")
+    return response
 
 @dataclass
 class RequestContext:

@@ -128,9 +128,29 @@
         .config-example .string {
             color: #ce9178;
         }
+        .logout-button {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .logout-button:hover {
+            background: #c82333;
+        }
     </style>
 </head>
 <body>
+    <a href="/logout" class="logout-button">Logout</a>
     <div class="container">
         <div class="success-icon">✓</div>
         <h1>Authorization Successful!</h1>

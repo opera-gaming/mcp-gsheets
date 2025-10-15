@@ -44,7 +44,8 @@ def get_credentials_from_jwt(token: str) -> Optional[Credentials]:
             token_uri=creds_dict['token_uri'],
             client_id=creds_dict['client_id'],
             client_secret=creds_dict['client_secret'],
-            scopes=creds_dict['scopes']
+            scopes=creds_dict['scopes'],
+            expiry=creds_dict.get('expiry')
         )
 
         return creds
