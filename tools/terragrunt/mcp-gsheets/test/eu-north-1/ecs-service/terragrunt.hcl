@@ -84,7 +84,7 @@ inputs = merge(local, {
     port                = "traffic-port"
     protocol            = "HTTP"
     unhealthy_threshold = 2
-    matcher             = "204"
+    matcher             = "200"
   }
 
   ### task definition
