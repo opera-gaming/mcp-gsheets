@@ -118,6 +118,17 @@ mcp = FastMCP(
 
 
 # ============================================================================
+# HEALTH ENDPOINT
+# ============================================================================
+
+@mcp.custom_route("/health", methods=["GET"])
+async def health_check(request):
+    """Health check endpoint that returns 204 No Content"""
+    from starlette.responses import Response
+    return Response(status_code=204)
+
+
+# ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
 
