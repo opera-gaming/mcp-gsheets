@@ -1,24 +1,20 @@
-FROM python:3.12-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+RUN pip install --no-cache-dir uv
 
-# Copy pyproject.toml first to generate lockfile
-COPY pyproject.toml .
+COPY pyproject.toml uv.lock* README.md ./
+COPY src/ ./src/
+COPY templates/ ./templates/
+COPY alembic/ ./alembic/
+COPY alembic.ini ./
 
-# Generate lockfile
-RUN uv lock
+RUN uv pip install --system -e .
 
-# Copy the rest of the application code
-COPY . .
-
-# Install dependencies
-RUN uv sync --frozen --no-dev
+ENV PORT=8080
+ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8080
 
-ENV PYTHONUNBUFFERED=1
-
-CMD ["uv", "run", "uvicorn", "mcp_gsheets:server", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["python", "-m", "mcp_gsheets.http_server"]

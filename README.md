@@ -11,8 +11,77 @@ A comprehensive MCP server for Google Sheets API v4 with full formatting, charts
 - Merge/unmerge cells, find/replace with regex
 - Row/column operations, sheet management
 - 40+ tools covering the complete Google Sheets API
+- **NEW:** Multi-user support with web OAuth and JWT authentication
+- **NEW:** Docker deployment with PostgreSQL backend
 
-## Quick Start
+## Deployment Options
+
+### Option 1: Multi-User Web OAuth + JWT (Recommended for Teams)
+
+Run as a web service with centralized authentication. Users authorize once via web UI and receive a JWT token to use with their MCP clients.
+
+**Quick Start:**
+
+1. **Google Cloud Setup** - Create OAuth 2.0 credentials:
+   - Go to [Google Cloud Console](https://console.cloud.google.com/)
+   - Create a new project and enable Google Sheets API & Google Drive API
+   - Go to APIs & Services → Credentials → Create OAuth 2.0 Client ID
+   - Choose "Web application" (not Desktop)
+   - Add authorized redirect URI: `http://localhost:8080/auth/callback`
+   - Download credentials and note the Client ID and Secret
+
+2. **Setup Environment:**
+```bash
+git clone https://github.com/opera-emoller/mcp-gsheets.git
+cd mcp-gsheets
+cp .env.example .env
+```
+
+Edit `.env` and add your Google OAuth credentials:
+```bash
+GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-client-secret
+
+# Generate secrets:
+python -c "import secrets; print('JWT_SECRET_KEY=' + secrets.token_urlsafe(32))"
+python -c "from cryptography.fernet import Fernet; print('ENCRYPTION_KEY=' + Fernet.generate_key().decode())"
+```
+
+3. **Start Services:**
+```bash
+docker-compose up -d
+```
+
+4. **Authorize & Get Token:**
+   - Open http://localhost:8080
+   - Click "Sign in with Google"
+   - Authorize access to Google Sheets
+   - Copy your JWT token
+
+5. **Configure MCP Client:**
+
+Add to your MCP client configuration:
+```json
+{
+  "mcp-gsheets": {
+    "command": "curl",
+    "args": [
+      "-X", "POST",
+      "http://localhost:8081/mcp/v1/call",
+      "-H", "Authorization: Bearer YOUR_JWT_TOKEN_HERE",
+      "-H", "Content-Type: application/json",
+      "-d", "@-"
+    ]
+  }
+}
+```
+
+**Architecture:**
+- Web Service (port 8080): OAuth flow and JWT token generation
+- MCP Server (port 8081): HTTP API with JWT validation
+- PostgreSQL: Encrypted credential storage
+
+### Option 2: Single-User Local OAuth (Quick Start)
 
 ### 1. Google Cloud Setup (OAuth - Recommended)
 

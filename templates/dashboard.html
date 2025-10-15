@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Your MCP Token</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 60px 40px;
+            max-width: 700px;
+            width: 100%;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 32px;
+            text-align: center;
+        }
+        .success-icon {
+            text-align: center;
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+        .user-email {
+            text-align: center;
+            color: #666;
+            margin-bottom: 40px;
+            font-size: 16px;
+        }
+        .token-section {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 30px;
+        }
+        .token-label {
+            color: #333;
+            font-weight: 600;
+            margin-bottom: 12px;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .token-box {
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            padding: 16px;
+            word-break: break-all;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            color: #333;
+            line-height: 1.6;
+            margin-bottom: 12px;
+        }
+        .copy-button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 100%;
+        }
+        .copy-button:hover {
+            background: #5568d3;
+        }
+        .copy-button.copied {
+            background: #48bb78;
+        }
+        .instructions {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 20px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .instructions h3 {
+            color: #856404;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .instructions p {
+            color: #856404;
+            line-height: 1.6;
+            margin-bottom: 12px;
+        }
+        .instructions code {
+            background: #fff;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+        .config-example {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            overflow-x: auto;
+            margin-top: 12px;
+        }
+        .config-example .key {
+            color: #9cdcfe;
+        }
+        .config-example .string {
+            color: #ce9178;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="success-icon">✓</div>
+        <h1>Authorization Successful!</h1>
+        <p class="user-email">{{ email }}</p>
+
+        <div class="config-example" id="mcpConfig">
+<span class="key">"mcp-gsheets"</span>: {<br>
+&nbsp;&nbsp;<span class="key">"type"</span>: <span class="string">"http"</span>,<br>
+&nbsp;&nbsp;<span class="key">"url"</span>: <span class="string">"{{ mcp_url }}"</span>,<br>
+&nbsp;&nbsp;<span class="key">"headers"</span>: {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"Authorization"</span>: <span class="string">"Bearer {{ token }}"</span><br>
+&nbsp;&nbsp;}<br>
+}
+        </div>
+        <button class="copy-button" style="margin-top: 12px;" onclick="copyConfig()">
+            Copy Configuration
+        </button>
+    </div>
+
+    <script>
+        const TOKEN = "{{ token }}";
+        const MCP_URL = "{{ mcp_url }}";
+
+        function copyConfig() {
+            const config = `"mcp-gsheets": {
+  "type": "http",
+  "url": "${MCP_URL}",
+  "headers": {
+    "Authorization": "Bearer ${TOKEN}"
+  }
+}`;
+            const button = event.currentTarget;
+
+            navigator.clipboard.writeText(config).then(function() {
+                button.textContent = 'Copied!';
+                button.classList.add('copied');
+                setTimeout(function() {
+                    button.textContent = 'Copy Configuration';
+                    button.classList.remove('copied');
+                }, 2000);
+            }, function(err) {
+                console.error('Failed to copy config: ', err);
+            });
+        }
+    </script>
+</body>
+</html>

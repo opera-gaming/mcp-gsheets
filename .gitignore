@@ -34,11 +34,22 @@ env/
 *.swo
 *~
 
+# Environment variables
+.env
+.env.local
+.env.*.local
+
 # Credentials
 token.json
 credentials.json
+client-secrets.json
 service_account.json
 *.key.json
+*.pem
+
+# Database
+*.db
+*.sqlite
 
 # OS
 .DS_Store
@@ -72,3 +83,6 @@ terraform.rc
 # Terragrunt
 .terragrunt-cache/
 **/terragrunt-cache/
+# Old dockerfiles (deprecated)
+Dockerfile.web
+Dockerfile.mcp
