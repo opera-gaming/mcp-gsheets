@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
 # MCP imports
-from mcp.server.fastmcp import FastMCP, Context
+from fastmcp import FastMCP, Context
 
 # Google API imports
 from google.oauth2.credentials import Credentials
@@ -93,11 +93,11 @@ async def spreadsheet_lifespan(server: FastMCP) -> AsyncIterator[SpreadsheetCont
             print(f"Successfully authenticated using ADC for project: {project}")
         except Exception as e:
             print(f"Error using Application Default Credentials: {e}")
-            raise Exception("All authentication methods failed. Please configure credentials.")
+            print("No credentials available at startup - will use per-request authentication")
 
-    # Build the services
-    sheets_service = build('sheets', 'v4', credentials=creds)
-    drive_service = build('drive', 'v3', credentials=creds)
+    # Build the services (allow None credentials for per-request auth)
+    sheets_service = build('sheets', 'v4', credentials=creds) if creds else None
+    drive_service = build('drive', 'v3', credentials=creds) if creds else None
 
     try:
         yield SpreadsheetContext(

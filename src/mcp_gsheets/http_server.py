@@ -41,13 +41,20 @@ JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY')
 JWT_ALGORITHM = 'HS256'
 JWT_EXPIRATION_DAYS = 30
 
-app = FastAPI(title="MCP Google Sheets Server")
+mcp_app = sheets_mcp.http_app()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with mcp_app.lifespan(app):
+        yield
+
+app = FastAPI(title="MCP Google Sheets Server", lifespan=lifespan)
 
 templates = Jinja2Templates(directory="templates")
 
 Base.metadata.create_all(bind=engine)
 
-app.mount("/mcp", sheets_mcp.sse_app())
+app.mount("/mcp", mcp_app)
 
 def create_jwt_token(user_id: int, email: str) -> str:
     payload = {
