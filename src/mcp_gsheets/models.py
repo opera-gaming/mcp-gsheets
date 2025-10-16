@@ -6,7 +6,15 @@ from sqlalchemy.orm import relationship
 from cryptography.fernet import Fernet
 from .db import Base
 
-ENCRYPTION_KEY = os.environ.get('ENCRYPTION_KEY', Fernet.generate_key().decode())
+# CRITICAL: ENCRYPTION_KEY must be set in environment variables
+# If not set, previously encrypted data will be unrecoverable
+ENCRYPTION_KEY = os.environ.get('ENCRYPTION_KEY')
+if not ENCRYPTION_KEY:
+    raise RuntimeError(
+        "ENCRYPTION_KEY environment variable is required. "
+        "Generate one with: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+    )
+
 fernet = Fernet(ENCRYPTION_KEY.encode() if isinstance(ENCRYPTION_KEY, str) else ENCRYPTION_KEY)
 
 class User(Base):

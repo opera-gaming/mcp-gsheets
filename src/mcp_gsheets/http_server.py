@@ -24,12 +24,20 @@ from google.auth.transport.requests import Request as GoogleRequest
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 import google.auth
 
 from .auth import get_credentials_from_jwt, validate_jwt_token
 from .server import mcp as sheets_mcp, SpreadsheetContext, request_context_var
 from .db import get_db, engine, Base
 from .models import User, OAuthCredential
+from .exceptions import (
+    AuthenticationError,
+    TokenExpiredError,
+    InvalidTokenError,
+    CredentialsNotFoundError,
+    DatabaseError
+)
 
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
 OAUTH_SCOPES = [
@@ -57,9 +65,9 @@ class MCPAuthMiddleware(BaseHTTPMiddleware):
             if auth_header:
                 jwt_token = await get_jwt_from_header(auth_header)
                 if jwt_token:
-                    logger.info("JWT token found, retrieving credentials")
-                    creds = get_credentials_from_jwt(jwt_token)
-                    if creds:
+                    try:
+                        logger.info("JWT token found, retrieving credentials")
+                        creds = get_credentials_from_jwt(jwt_token)
                         logger.info("Building Google API services with user credentials")
                         sheets_service = build('sheets', 'v4', credentials=creds)
                         drive_service = build('drive', 'v3', credentials=creds)
@@ -74,8 +82,9 @@ class MCPAuthMiddleware(BaseHTTPMiddleware):
                         request.state.mcp_context = context
                         request_context_var.set(context)
                         logger.info("Per-request context set in contextvar")
-                    else:
-                        logger.warning("Failed to get credentials from JWT")
+                    except AuthenticationError as e:
+                        logger.warning(f"Authentication failed: {e.message}")
+                        # Let the exception handler deal with it
                 else:
                     logger.warning("No JWT token in authorization header")
             else:
@@ -101,6 +110,25 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 Base.metadata.create_all(bind=engine)
+
+# Exception handlers
+@app.exception_handler(AuthenticationError)
+async def authentication_error_handler(request: Request, exc: AuthenticationError):
+    """Handle authentication errors."""
+    logger.warning(f"Authentication error: {exc.message}")
+    return JSONResponse(
+        status_code=401,
+        content={"error": exc.message}
+    )
+
+@app.exception_handler(DatabaseError)
+async def database_error_handler(request: Request, exc: DatabaseError):
+    """Handle database errors."""
+    logger.error(f"Database error: {exc.message}")
+    return JSONResponse(
+        status_code=503,
+        content={"error": "Service temporarily unavailable"}
+    )
 
 def create_jwt_token(user_id: int, email: str) -> str:
     payload = {
@@ -265,18 +293,25 @@ async def get_jwt_from_header(authorization: Optional[str] = Header(None)) -> Op
 
 @app.post("/mcp/v1/call")
 async def mcp_call(request: Request, authorization: Optional[str] = Header(None)):
+    """
+    MCP tool call endpoint.
+
+    Raises:
+        AuthenticationError: If authentication fails
+        HTTPException: For other errors
+    """
     jwt_token = await get_jwt_from_header(authorization)
 
     if not jwt_token:
-        raise HTTPException(status_code=401, detail="Missing or invalid authorization token")
+        raise AuthenticationError("Missing or invalid authorization token")
 
-    payload = validate_jwt_token(jwt_token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-
-    creds = get_credentials_from_jwt(jwt_token)
-    if not creds:
-        raise HTTPException(status_code=401, detail="Unable to retrieve credentials")
+    # validate_jwt_token and get_credentials_from_jwt will raise typed exceptions
+    try:
+        payload = validate_jwt_token(jwt_token)
+        creds = get_credentials_from_jwt(jwt_token)
+    except AuthenticationError:
+        # Re-raise authentication errors to be caught by exception handler
+        raise
 
     sheets_service = build('sheets', 'v4', credentials=creds)
     drive_service = build('drive', 'v3', credentials=creds)
@@ -307,14 +342,41 @@ async def mcp_call(request: Request, authorization: Optional[str] = Header(None)
         return JSONResponse(content={"result": result})
 
     except Exception as e:
+        logger.error(f"Error calling tool {tool_name}: {e}")
         return JSONResponse(
             status_code=500,
             content={"error": str(e)}
         )
 
 @app.get("/health")
-async def health():
-    return {"status": "ok"}
+async def health(db: Session = Depends(get_db)):
+    """
+    Health check endpoint that verifies database connectivity.
+
+    Returns:
+        200: Service is healthy
+        503: Service is unavailable (database connection failed)
+    """
+    checks = {
+        "status": "ok",
+        "database": "unknown"
+    }
+
+    # Check database connectivity
+    try:
+        # Execute a simple query to verify database connection
+        db.execute(text("SELECT 1"))
+        checks["database"] = "healthy"
+    except Exception as e:
+        logger.error(f"Database health check failed: {e}")
+        checks["database"] = "unhealthy"
+        checks["status"] = "degraded"
+        return JSONResponse(
+            status_code=503,
+            content=checks
+        )
+
+    return checks
 
 @app.get("/tools")
 async def list_tools():

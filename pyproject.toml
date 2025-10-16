@@ -35,7 +35,6 @@ build-backend = "hatchling.build"
 
 [project.scripts]
 mcp-gsheets = "mcp_gsheets:main"
-mcp-gsheets-web = "mcp_gsheets.webapp:main"
 mcp-gsheets-http = "mcp_gsheets.http_server:main"
 
 [tool.hatch.build.targets.wheel]
