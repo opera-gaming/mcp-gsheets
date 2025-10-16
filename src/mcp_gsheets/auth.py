@@ -4,7 +4,6 @@ import logging
 from typing import Optional
 from google.oauth2.credentials import Credentials
 from sqlalchemy.orm import Session
-from .db import SessionLocal
 from .models import User, OAuthCredential
 from .exceptions import TokenExpiredError, InvalidTokenError, CredentialsNotFoundError
 
@@ -37,12 +36,13 @@ def validate_jwt_token(token: str) -> Optional[dict]:
         logger.warning(f"Invalid JWT token: {e}")
         raise InvalidTokenError(str(e))
 
-def get_credentials_from_jwt(token: str) -> Optional[Credentials]:
+def get_credentials_from_jwt(token: str, db: Session) -> Optional[Credentials]:
     """
     Get Google credentials from JWT token.
 
     Args:
         token: JWT token string
+        db: SQLAlchemy database session
 
     Returns:
         Google Credentials object or None
@@ -63,29 +63,25 @@ def get_credentials_from_jwt(token: str) -> Optional[Credentials]:
         logger.error("No user_id in JWT payload")
         raise InvalidTokenError("Token missing user_id")
 
-    db: Session = SessionLocal()
-    try:
-        user = db.query(User).filter(User.id == user_id).first()
-        if not user or not user.credentials:
-            logger.warning(f"Credentials not found for user_id: {user_id}")
-            raise CredentialsNotFoundError()
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user or not user.credentials:
+        logger.warning(f"Credentials not found for user_id: {user_id}")
+        raise CredentialsNotFoundError()
 
-        oauth_cred = user.credentials
-        creds_dict = oauth_cred.to_google_credentials_dict()
+    oauth_cred = user.credentials
+    creds_dict = oauth_cred.to_google_credentials_dict()
 
-        creds = Credentials(
-            token=creds_dict['token'],
-            refresh_token=creds_dict['refresh_token'],
-            token_uri=creds_dict['token_uri'],
-            client_id=creds_dict['client_id'],
-            client_secret=creds_dict['client_secret'],
-            scopes=creds_dict['scopes'],
-            expiry=creds_dict.get('expiry')
-        )
+    creds = Credentials(
+        token=creds_dict['token'],
+        refresh_token=creds_dict['refresh_token'],
+        token_uri=creds_dict['token_uri'],
+        client_id=creds_dict['client_id'],
+        client_secret=creds_dict['client_secret'],
+        scopes=creds_dict['scopes'],
+        expiry=creds_dict.get('expiry')
+    )
 
-        return creds
-    finally:
-        db.close()
+    return creds
 
 def get_user_email_from_jwt(token: str) -> Optional[str]:
     """

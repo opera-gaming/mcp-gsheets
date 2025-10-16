@@ -29,7 +29,7 @@ import google.auth
 
 from .auth import get_credentials_from_jwt, validate_jwt_token
 from .server import mcp as sheets_mcp, SpreadsheetContext, request_context_var
-from .db import get_db, engine, Base
+from .db import get_db, engine, Base, SessionLocal
 from .models import User, OAuthCredential
 from .exceptions import (
     AuthenticationError,
@@ -65,9 +65,10 @@ class MCPAuthMiddleware(BaseHTTPMiddleware):
             if auth_header:
                 jwt_token = await get_jwt_from_header(auth_header)
                 if jwt_token:
+                    db = SessionLocal()
                     try:
                         logger.info("JWT token found, retrieving credentials")
-                        creds = get_credentials_from_jwt(jwt_token)
+                        creds = get_credentials_from_jwt(jwt_token, db)
                         logger.info("Building Google API services with user credentials")
                         sheets_service = build('sheets', 'v4', credentials=creds)
                         drive_service = build('drive', 'v3', credentials=creds)
@@ -85,6 +86,8 @@ class MCPAuthMiddleware(BaseHTTPMiddleware):
                     except AuthenticationError as e:
                         logger.warning(f"Authentication failed: {e.message}")
                         # Let the exception handler deal with it
+                    finally:
+                        db.close()
                 else:
                     logger.warning("No JWT token in authorization header")
             else:
@@ -303,7 +306,7 @@ async def get_jwt_from_header(authorization: Optional[str] = Header(None)) -> Op
     return authorization[7:]
 
 @app.post("/mcp/v1/call")
-async def mcp_call(request: Request, authorization: Optional[str] = Header(None)):
+async def mcp_call(request: Request, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
     """
     MCP tool call endpoint.
 
@@ -319,7 +322,7 @@ async def mcp_call(request: Request, authorization: Optional[str] = Header(None)
     # validate_jwt_token and get_credentials_from_jwt will raise typed exceptions
     try:
         payload = validate_jwt_token(jwt_token)
-        creds = get_credentials_from_jwt(jwt_token)
+        creds = get_credentials_from_jwt(jwt_token, db)
     except AuthenticationError:
         # Re-raise authentication errors to be caught by exception handler
         raise
