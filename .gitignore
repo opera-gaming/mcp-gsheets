@@ -83,8 +83,5 @@ terraform.rc
 # Terragrunt
 .terragrunt-cache/
 **/terragrunt-cache/
-# Old dockerfiles (deprecated)
-Dockerfile.web
-Dockerfile.mcp
 
 .mcp.json
