@@ -11,8 +11,8 @@ A comprehensive MCP server for Google Sheets API v4 with full formatting, charts
 - Merge/unmerge cells, find/replace with regex
 - Row/column operations, sheet management
 - 40+ tools covering the complete Google Sheets API
-- **NEW:** Multi-user support with web OAuth and JWT authentication
-- **NEW:** Docker deployment with PostgreSQL backend
+- Multi-user support with web OAuth and JWT authentication
+- Docker deployment with PostgreSQL backend
 
 ## Deployment Options
 
@@ -32,16 +32,23 @@ Run as a hosted MCP server with web-based OAuth authentication. Users authorize 
 
 2. **Setup Environment:**
 ```bash
-git clone https://github.com/opera-emoller/mcp-gsheets.git
+git clone https://github.com/opera-gaming/mcp-gsheets.git
 cd mcp-gsheets
 cp .env.example .env
 ```
 
 Edit `.env` and add your Google OAuth credentials:
 ```bash
+# Database
+DATABASE_URL=postgresql://mcpuser:mcppassword@localhost:5432/mcp_gsheets
+
+# Google OAuth
 GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your-client-secret
+
+# Server Configuration
 BASE_URL=http://localhost:8080
+PORT=8080
 
 # Generate secrets:
 python -c "import secrets; print('JWT_SECRET_KEY=' + secrets.token_urlsafe(32))"
@@ -57,27 +64,29 @@ docker-compose up -d
    - Open http://localhost:8080
    - Click "Sign in with Google"
    - Authorize access to Google Sheets
-   - Copy your JWT token from the dashboard
+   - Copy your MCP configuration from the dashboard
 
 5. **Configure MCP Client:**
 
-Create or update `.mcp.json` in your project:
+Create or update `.mcp.json` in your project directory:
 ```json
 {
   "mcpServers": {
     "mcp-gsheets": {
       "type": "http",
-      "url": "http://localhost:8080/mcp/mcp",
+      "url": "http://localhost:8080/mcp",
       "headers": {
-        "Authorization": "Bearer YOUR_JWT_TOKEN_HERE"
+        "Authorization": "Bearer YOUR_TOKEN_FROM_DASHBOARD"
       }
     }
   }
 }
 ```
 
+Replace `YOUR_TOKEN_FROM_DASHBOARD` with the JWT token shown on the dashboard after authentication.
+
 **Architecture:**
-- Web Service (port 8080): OAuth flow, JWT token generation, and MCP endpoint
+- Web Service (port 8080): OAuth flow (`/auth/google`), JWT token generation, dashboard (`/dashboard`), and MCP endpoint (`{BASE_URL}/mcp`)
 - PostgreSQL: Encrypted credential storage (refresh tokens, access tokens)
 - FastMCP: HTTP-based MCP server with JWT authentication middleware
 - Per-request authentication: Each MCP call uses the user's stored Google credentials

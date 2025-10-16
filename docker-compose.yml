@@ -41,6 +41,7 @@ services:
       "
     volumes:
       - ./templates:/app/templates
+      - ./static:/app/static
 
 volumes:
   postgres_data:

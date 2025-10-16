@@ -15,6 +15,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 from fastapi import FastAPI, Request, HTTPException, Header, Depends
 from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 from google.oauth2.credentials import Credentials
@@ -96,11 +97,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="MCP Google Sheets Server", lifespan=lifespan)
 app.add_middleware(MCPAuthMiddleware)
 
+app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 Base.metadata.create_all(bind=engine)
-
-app.mount("/mcp", mcp_app)
 
 def create_jwt_token(user_id: int, email: str) -> str:
     payload = {
@@ -223,7 +223,7 @@ async def dashboard(request: Request):
         payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
         email = payload.get('email')
 
-        mcp_url = f"{BASE_URL}/mcp/mcp"
+        mcp_url = f"{BASE_URL}/mcp"
 
         return templates.TemplateResponse("dashboard.html", {
             "request": request,
@@ -320,6 +320,9 @@ async def health():
 async def list_tools():
     tools_list = await sheets_mcp.list_tools()
     return {"tools": tools_list}
+
+# Mount MCP app at root - this must be last so other routes take precedence
+app.mount("/", mcp_app)
 
 def main():
     import uvicorn

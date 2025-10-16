@@ -1,7 +1,6 @@
 import os
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, declarative_base
 
 DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://mcpuser:mcppassword@localhost:5432/mcp_gsheets')
 
