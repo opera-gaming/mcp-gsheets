@@ -3,7 +3,7 @@ import os
 import json
 import logging
 from typing import Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -131,11 +131,22 @@ async def database_error_handler(request: Request, exc: DatabaseError):
     )
 
 def create_jwt_token(user_id: int, email: str) -> str:
+    """
+    Create a JWT token for user authentication.
+
+    Args:
+        user_id: User's database ID
+        email: User's email address
+
+    Returns:
+        Encoded JWT token string
+    """
+    now = datetime.now(timezone.utc)
     payload = {
         'user_id': user_id,
         'email': email,
-        'exp': datetime.utcnow() + timedelta(days=JWT_EXPIRATION_DAYS),
-        'iat': datetime.utcnow()
+        'exp': now + timedelta(days=JWT_EXPIRATION_DAYS),
+        'iat': now
     }
     return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
 
@@ -208,7 +219,7 @@ async def auth_callback(request: Request, code: str, db: Session = Depends(get_d
     else:
         user.email = email
         user.name = name
-        user.updated_at = datetime.utcnow()
+        user.updated_at = datetime.now(timezone.utc)
         db.commit()
 
     oauth_cred = db.query(OAuthCredential).filter(OAuthCredential.user_id == user.id).first()
@@ -224,7 +235,7 @@ async def auth_callback(request: Request, code: str, db: Session = Depends(get_d
     oauth_cred.client_secret = credentials.client_secret
     oauth_cred.scopes = json.dumps(credentials.scopes)
     oauth_cred.expiry = credentials.expiry
-    oauth_cred.updated_at = datetime.utcnow()
+    oauth_cred.updated_at = datetime.now(timezone.utc)
 
     db.commit()
 

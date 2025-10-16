@@ -1,6 +1,6 @@
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from cryptography.fernet import Fernet
@@ -17,6 +17,10 @@ if not ENCRYPTION_KEY:
 
 fernet = Fernet(ENCRYPTION_KEY.encode() if isinstance(ENCRYPTION_KEY, str) else ENCRYPTION_KEY)
 
+def utc_now():
+    """Return current UTC time (timezone-aware)."""
+    return datetime.now(timezone.utc)
+
 class User(Base):
     __tablename__ = 'users'
 
@@ -24,8 +28,8 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     google_id = Column(String, unique=True, index=True, nullable=False)
     name = Column(String)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
     credentials = relationship("OAuthCredential", back_populates="user", uselist=False)
 
@@ -41,8 +45,8 @@ class OAuthCredential(Base):
     client_secret = Column(String)
     scopes = Column(Text)
     expiry = Column(DateTime)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
     user = relationship("User", back_populates="credentials")
 
