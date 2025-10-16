@@ -201,10 +201,25 @@ async def auth_google():
         include_granted_scopes='true',
         prompt='consent'
     )
-    return RedirectResponse(url=authorization_url)
+    # Store state in secure cookie for CSRF protection
+    response = RedirectResponse(url=authorization_url)
+    response.set_cookie(
+        key="oauth_state",
+        value=state,
+        max_age=600,  # 10 minutes
+        httponly=True,
+        secure=not IS_DEVELOPMENT,
+        samesite="lax"
+    )
+    return response
 
 @app.get("/auth/callback")
-async def auth_callback(request: Request, code: str, db: Session = Depends(get_db)):
+async def auth_callback(request: Request, code: str, state: str, db: Session = Depends(get_db)):
+    # Validate state parameter for CSRF protection
+    stored_state = request.cookies.get("oauth_state")
+    if not stored_state or stored_state != state:
+        raise HTTPException(status_code=400, detail="Invalid state parameter - possible CSRF attack")
+
     flow = get_flow()
     flow.fetch_token(code=code)
 
@@ -261,6 +276,8 @@ async def auth_callback(request: Request, code: str, db: Session = Depends(get_d
         secure=not IS_DEVELOPMENT,  # Only use secure flag in production (HTTPS)
         samesite="lax"
     )
+    # Clean up OAuth state cookie after successful authentication
+    response.delete_cookie("oauth_state")
     return response
 
 @app.get("/dashboard", response_class=HTMLResponse)
