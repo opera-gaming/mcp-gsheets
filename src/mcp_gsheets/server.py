@@ -4,11 +4,10 @@ mcp-gsheets Server
 Comprehensive Google Sheets MCP server covering the complete API v4 surface
 """
 
-import base64
 import os
 import logging
-from typing import List, Dict, Any, Optional, Union
-import json
+import re
+from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
@@ -22,20 +21,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Google API imports
-from google.oauth2.credentials import Credentials
-from google.oauth2 import service_account
-from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-import google.auth
-
-# Constants
-SCOPES = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-CREDENTIALS_CONFIG = os.environ.get('CREDENTIALS_CONFIG')
-TOKEN_PATH = os.environ.get('TOKEN_PATH', 'token.json')
-CREDENTIALS_PATH = os.environ.get('CREDENTIALS_PATH', 'credentials.json')
-SERVICE_ACCOUNT_PATH = os.environ.get('SERVICE_ACCOUNT_PATH', 'service_account.json')
-DRIVE_FOLDER_ID = os.environ.get('DRIVE_FOLDER_ID', '')
 
 # Per-request context storage for HTTP MCP server
 request_context_var: ContextVar[Optional['SpreadsheetContext']] = ContextVar('request_context', default=None)
@@ -50,72 +36,22 @@ class SpreadsheetContext:
 
 @asynccontextmanager
 async def spreadsheet_lifespan(server: FastMCP) -> AsyncIterator[SpreadsheetContext]:
-    """Manage Google Spreadsheet API connection lifecycle"""
-    creds = None
+    """
+    Manage Google Spreadsheet API connection lifecycle.
 
-    if CREDENTIALS_CONFIG:
-        creds = service_account.Credentials.from_service_account_info(
-            json.loads(base64.b64decode(CREDENTIALS_CONFIG)),
-            scopes=SCOPES
-        )
-
-    # Check for service account authentication
-    if not creds and SERVICE_ACCOUNT_PATH and os.path.exists(SERVICE_ACCOUNT_PATH):
-        try:
-            creds = service_account.Credentials.from_service_account_file(
-                SERVICE_ACCOUNT_PATH,
-                scopes=SCOPES
-            )
-            print("Using service account authentication")
-            print(f"Working with Google Drive folder ID: {DRIVE_FOLDER_ID or 'Not specified'}")
-        except Exception as e:
-            print(f"Error using service account authentication: {e}")
-            creds = None
-
-    # Fall back to OAuth flow
-    if not creds:
-        print("Trying OAuth authentication flow")
-        if os.path.exists(TOKEN_PATH):
-            with open(TOKEN_PATH, 'r') as token:
-                creds = Credentials.from_authorized_user_info(json.load(token), SCOPES)
-
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                try:
-                    flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
-                    creds = flow.run_local_server(port=0)
-
-                    with open(TOKEN_PATH, 'w') as token:
-                        token.write(creds.to_json())
-                    print("Successfully authenticated using OAuth flow")
-                except Exception as e:
-                    print(f"Error with OAuth flow: {e}")
-                    creds = None
-
-    # Try Application Default Credentials
-    if not creds:
-        try:
-            print("Attempting to use Application Default Credentials (ADC)")
-            creds, project = google.auth.default(scopes=SCOPES)
-            print(f"Successfully authenticated using ADC for project: {project}")
-        except Exception as e:
-            print(f"Error using Application Default Credentials: {e}")
-            print("No credentials available at startup - will use per-request authentication")
-
-    # Build the services (allow None credentials for per-request auth)
-    sheets_service = build('sheets', 'v4', credentials=creds) if creds else None
-    drive_service = build('drive', 'v3', credentials=creds) if creds else None
+    Authentication is handled per-request via JWT tokens in the HTTP middleware.
+    The lifespan context returns None services as a fallback.
+    """
+    logger.info("MCP server starting - using per-request authentication only")
 
     try:
         yield SpreadsheetContext(
-            sheets_service=sheets_service,
-            drive_service=drive_service,
-            folder_id=DRIVE_FOLDER_ID if DRIVE_FOLDER_ID else None
+            sheets_service=None,
+            drive_service=None,
+            folder_id=None
         )
     finally:
-        pass
+        logger.info("MCP server shutting down")
 
 
 # Initialize the MCP server
@@ -162,8 +98,6 @@ def get_sheet_id(sheets_service: Any, spreadsheet_id: str, sheet_name: str) -> O
 
 def parse_a1_notation(a1_range: str) -> Dict[str, int]:
     """Parse A1 notation range to grid coordinates"""
-    import re
-
     match = re.match(r'([A-Z]+)(\d+):([A-Z]+)(\d+)', a1_range)
     if not match:
         return None
@@ -1272,7 +1206,6 @@ def format_cells(
     if sheet_id is None:
         return {"error": f"Sheet '{sheet}' not found"}
 
-    import re
     if re.match(r'^[A-Z]+\d+$', range):
         range = f"{range}:{range}"
 

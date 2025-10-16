@@ -2,11 +2,9 @@
 import os
 import json
 import logging
-from typing import Any, Optional
+from typing import Optional
 from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
-from collections.abc import AsyncIterator
-from dataclasses import dataclass
 
 import jwt
 
@@ -19,13 +17,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 from google.oauth2.credentials import Credentials
-from google.oauth2 import service_account
-from google.auth.transport.requests import Request as GoogleRequest
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-import google.auth
 
 from .auth import get_credentials_from_jwt, validate_jwt_token
 from .server import mcp as sheets_mcp, SpreadsheetContext, request_context_var
@@ -51,7 +46,17 @@ OAUTH_SCOPES = [
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID')
 GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET')
 BASE_URL = os.environ.get('BASE_URL', 'http://localhost:8080')
+
+# Detect development environment (localhost)
+IS_DEVELOPMENT = 'localhost' in BASE_URL or '127.0.0.1' in BASE_URL
+
+# JWT Configuration
 JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY')
+if not JWT_SECRET_KEY:
+    raise RuntimeError(
+        "JWT_SECRET_KEY environment variable is required. "
+        "Generate one with: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+    )
 JWT_ALGORITHM = 'HS256'
 JWT_EXPIRATION_DAYS = 30
 
@@ -253,6 +258,7 @@ async def auth_callback(request: Request, code: str, db: Session = Depends(get_d
         value=jwt_token,
         max_age=JWT_EXPIRATION_DAYS * 24 * 60 * 60,
         httponly=True,
+        secure=not IS_DEVELOPMENT,  # Only use secure flag in production (HTTPS)
         samesite="lax"
     )
     return response
@@ -293,11 +299,6 @@ async def logout():
     response = RedirectResponse(url="/")
     response.delete_cookie("mcp_jwt_token")
     return response
-
-@dataclass
-class RequestContext:
-    user_email: Optional[str] = None
-    jwt_token: Optional[str] = None
 
 async def get_jwt_from_header(authorization: Optional[str] = Header(None)) -> Optional[str]:
     if not authorization:
