@@ -180,10 +180,13 @@ async def root(request: Request):
         except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
             pass
 
-    return templates.TemplateResponse("index.html", {
-        "request": request,
-        "base_url": BASE_URL
-    })
+    return templates.TemplateResponse(
+        name="index.html",
+        context={
+            "request": request,
+            "base_url": BASE_URL
+        }
+    )
 
 @app.get("/auth/google")
 async def auth_google():
@@ -267,12 +270,15 @@ async def dashboard(request: Request):
 
         mcp_url = f"{BASE_URL}/mcp"
 
-        return templates.TemplateResponse("dashboard.html", {
-            "request": request,
-            "token": token,
-            "email": email,
-            "mcp_url": mcp_url
-        })
+        return templates.TemplateResponse(
+            name="dashboard.html",
+            context={
+                "request": request,
+                "token": token,
+                "email": email,
+                "mcp_url": mcp_url
+            }
+        )
     except jwt.ExpiredSignatureError:
         response = RedirectResponse(url="/")
         response.delete_cookie("mcp_jwt_token")
