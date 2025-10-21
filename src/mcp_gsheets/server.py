@@ -54,11 +54,18 @@ async def spreadsheet_lifespan(server: FastMCP) -> AsyncIterator[SpreadsheetCont
         logger.info("MCP server shutting down")
 
 
+# Get BASE_URL for OAuth endpoints
+BASE_URL = os.environ.get('BASE_URL', 'http://localhost:8080')
+
 # Initialize the MCP server
 mcp = FastMCP(
     "mcp-gsheets",
     lifespan=spreadsheet_lifespan
 )
+
+# Note: OAuth capability is advertised via the /mcp/oauth/metadata endpoint
+# MCP clients can discover OAuth support by checking that endpoint
+# The FastMCP library handles capability negotiation automatically
 
 
 # ============================================================================

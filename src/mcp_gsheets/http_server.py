@@ -215,10 +215,28 @@ async def auth_google():
 
 @app.get("/auth/callback")
 async def auth_callback(request: Request, code: str, state: str, db: Session = Depends(get_db)):
+    # Check if this is an MCP OAuth flow or web UI flow
+    mcp_state_cookie = request.cookies.get("mcp_oauth_state")
+    web_state_cookie = request.cookies.get("oauth_state")
+
+    is_mcp_flow = False
+    mcp_state_data = None
+
+    if mcp_state_cookie:
+        try:
+            mcp_state_data = json.loads(mcp_state_cookie)
+            if mcp_state_data.get('is_mcp_flow') and mcp_state_data.get('google_state') == state:
+                is_mcp_flow = True
+        except (json.JSONDecodeError, KeyError):
+            pass
+
     # Validate state parameter for CSRF protection
-    stored_state = request.cookies.get("oauth_state")
-    if not stored_state or stored_state != state:
-        raise HTTPException(status_code=400, detail="Invalid state parameter - possible CSRF attack")
+    if is_mcp_flow:
+        if not mcp_state_data or mcp_state_data.get('google_state') != state:
+            raise HTTPException(status_code=400, detail="Invalid state parameter - possible CSRF attack")
+    else:
+        if not web_state_cookie or web_state_cookie != state:
+            raise HTTPException(status_code=400, detail="Invalid state parameter - possible CSRF attack")
 
     flow = get_flow()
     flow.fetch_token(code=code)
@@ -267,6 +285,39 @@ async def auth_callback(request: Request, code: str, state: str, db: Session = D
 
     jwt_token = create_jwt_token(user.id, user.email)
 
+    # Handle MCP OAuth flow - redirect back to MCP client with code
+    if is_mcp_flow:
+        mcp_redirect_uri = mcp_state_data.get('mcp_redirect_uri')
+        mcp_state = mcp_state_data.get('mcp_state')
+
+        if mcp_redirect_uri:
+            # Generate authorization code for MCP client
+            # For simplicity, we'll use the JWT token as the authorization code
+            # In production, you might want to create a separate short-lived code
+            auth_code = jwt_token
+
+            # Build redirect URL with code and state
+            redirect_url = mcp_redirect_uri
+            separator = '&' if '?' in redirect_url else '?'
+            redirect_url += f"{separator}code={auth_code}"
+            if mcp_state:
+                redirect_url += f"&state={mcp_state}"
+
+            response = RedirectResponse(url=redirect_url)
+            response.delete_cookie("mcp_oauth_state")
+            return response
+        else:
+            # No redirect URI - return JSON response (for device flow or similar)
+            response = JSONResponse(content={
+                "access_token": jwt_token,
+                "token_type": "Bearer",
+                "expires_in": JWT_EXPIRATION_DAYS * 24 * 60 * 60,
+                "scope": "sheets drive"
+            })
+            response.delete_cookie("mcp_oauth_state")
+            return response
+
+    # Handle web UI flow
     response = RedirectResponse(url="/dashboard")
     response.set_cookie(
         key="mcp_jwt_token",
@@ -316,6 +367,276 @@ async def logout():
     response = RedirectResponse(url="/")
     response.delete_cookie("mcp_jwt_token")
     return response
+
+# ============================================================================
+# MCP OAUTH ENDPOINTS
+# ============================================================================
+
+def _oauth_metadata_response():
+    """Helper to generate OAuth metadata response"""
+    return {
+        "issuer": BASE_URL,
+        "authorization_endpoint": f"{BASE_URL}/mcp/oauth/authorize",
+        "token_endpoint": f"{BASE_URL}/mcp/oauth/token",
+        "revocation_endpoint": f"{BASE_URL}/mcp/oauth/revoke",
+        "registration_endpoint": f"{BASE_URL}/mcp/oauth/register",
+        "scopes_supported": ["sheets", "drive"],
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code", "refresh_token"],
+        "token_endpoint_auth_methods_supported": ["none"],
+        "code_challenge_methods_supported": ["S256", "plain"]
+    }
+
+@app.get("/mcp/oauth/metadata")
+async def oauth_metadata():
+    """
+    OAuth 2.0 Authorization Server Metadata endpoint.
+    Returns OAuth configuration for MCP clients.
+    """
+    return _oauth_metadata_response()
+
+@app.get("/mcp/.well-known/openid-configuration")
+async def openid_configuration():
+    """
+    OpenID Connect Discovery endpoint.
+    Standard well-known endpoint for OAuth metadata discovery.
+    """
+    return _oauth_metadata_response()
+
+@app.get("/.well-known/oauth-authorization-server")
+async def oauth_authorization_server():
+    """
+    OAuth 2.0 Authorization Server Metadata (RFC 8414).
+    Standard well-known endpoint for OAuth metadata discovery.
+    """
+    return _oauth_metadata_response()
+
+@app.get("/.well-known/oauth-authorization-server/mcp")
+async def oauth_authorization_server_mcp():
+    """
+    OAuth 2.0 Authorization Server Metadata for /mcp path.
+    """
+    return _oauth_metadata_response()
+
+@app.get("/mcp/oauth/authorize")
+async def mcp_oauth_authorize(
+    response_type: str,
+    client_id: str,
+    redirect_uri: Optional[str] = None,
+    state: Optional[str] = None,
+    scope: Optional[str] = None
+):
+    """
+    MCP OAuth authorization endpoint.
+    Initiates OAuth flow for MCP clients.
+
+    Args:
+        response_type: Must be "code"
+        client_id: MCP client identifier (can be any string for this implementation)
+        redirect_uri: Optional redirect URI for the client
+        state: Optional state parameter for CSRF protection
+        scope: Optional scope (defaults to sheets and drive)
+    """
+    if response_type != "code":
+        raise HTTPException(status_code=400, detail="Only 'code' response_type is supported")
+
+    # Start Google OAuth flow
+    flow = get_flow()
+    authorization_url, google_state = flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true',
+        prompt='consent'
+    )
+
+    # Store state mapping in session/cookie for callback
+    # We need to remember: google_state, mcp_state, mcp_redirect_uri, mcp_client_id
+    state_data = {
+        'google_state': google_state,
+        'mcp_state': state,
+        'mcp_redirect_uri': redirect_uri,
+        'mcp_client_id': client_id,
+        'is_mcp_flow': True
+    }
+
+    response = RedirectResponse(url=authorization_url)
+    response.set_cookie(
+        key="mcp_oauth_state",
+        value=json.dumps(state_data),
+        max_age=600,  # 10 minutes
+        httponly=True,
+        secure=not IS_DEVELOPMENT,
+        samesite="lax"
+    )
+    return response
+
+@app.post("/mcp/oauth/token")
+async def mcp_oauth_token(request: Request, db: Session = Depends(get_db)):
+    """
+    MCP OAuth token exchange endpoint.
+    Exchanges authorization code for access token, or refreshes an existing token.
+
+    Supports:
+    - grant_type=authorization_code: Exchange code for token
+    - grant_type=refresh_token: Refresh an existing token
+    """
+    form_data = await request.form()
+    grant_type = form_data.get('grant_type')
+
+    if grant_type == 'authorization_code':
+        code = form_data.get('code')
+        if not code:
+            raise HTTPException(status_code=400, detail="Missing 'code' parameter")
+
+        # In our simplified implementation, the code IS the JWT token
+        # Validate the JWT token
+        try:
+            payload = validate_jwt_token(code)
+            user_id = payload.get('user_id')
+            email = payload.get('email')
+
+            # Verify user still exists
+            user = db.query(User).filter(User.id == user_id).first()
+            if not user:
+                raise HTTPException(status_code=401, detail="Invalid authorization code")
+
+            # Return the token
+            return {
+                "access_token": code,
+                "token_type": "Bearer",
+                "expires_in": JWT_EXPIRATION_DAYS * 24 * 60 * 60,
+                "scope": "sheets drive",
+                "refresh_token": code  # In this implementation, same as access token
+            }
+
+        except (TokenExpiredError, InvalidTokenError) as e:
+            raise HTTPException(status_code=401, detail="Invalid or expired authorization code")
+
+    elif grant_type == 'refresh_token':
+        refresh_token = form_data.get('refresh_token')
+        if not refresh_token:
+            raise HTTPException(status_code=400, detail="Missing 'refresh_token' parameter")
+
+        # Validate and refresh the token
+        try:
+            payload = validate_jwt_token(refresh_token)
+            user_id = payload.get('user_id')
+            email = payload.get('email')
+
+            # Verify user still exists and has credentials
+            user = db.query(User).filter(User.id == user_id).first()
+            if not user or not user.credentials:
+                raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+            # Check if Google credentials need refreshing
+            oauth_cred = user.credentials
+            creds_dict = oauth_cred.to_google_credentials_dict()
+
+            # Refresh Google credentials if expired
+            creds = Credentials(
+                token=creds_dict['token'],
+                refresh_token=creds_dict['refresh_token'],
+                token_uri=creds_dict['token_uri'],
+                client_id=creds_dict['client_id'],
+                client_secret=creds_dict['client_secret'],
+                scopes=creds_dict['scopes'],
+                expiry=creds_dict.get('expiry')
+            )
+
+            # Check if credentials are expired and refresh if needed
+            if creds.expired and creds.refresh_token:
+                from google.auth.transport.requests import Request as GoogleRequest
+                creds.refresh(GoogleRequest())
+
+                # Update credentials in database
+                oauth_cred.set_token(creds.token)
+                oauth_cred.expiry = creds.expiry
+                oauth_cred.updated_at = datetime.now(timezone.utc)
+                db.commit()
+
+            # Generate new JWT token
+            new_jwt_token = create_jwt_token(user.id, user.email)
+
+            return {
+                "access_token": new_jwt_token,
+                "token_type": "Bearer",
+                "expires_in": JWT_EXPIRATION_DAYS * 24 * 60 * 60,
+                "scope": "sheets drive",
+                "refresh_token": new_jwt_token
+            }
+
+        except (TokenExpiredError, InvalidTokenError):
+            raise HTTPException(status_code=401, detail="Invalid refresh token")
+        except Exception as e:
+            logger.error(f"Error refreshing token: {e}")
+            raise HTTPException(status_code=500, detail="Failed to refresh token")
+
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported grant_type: {grant_type}")
+
+@app.post("/mcp/oauth/revoke")
+async def mcp_oauth_revoke(request: Request, db: Session = Depends(get_db)):
+    """
+    MCP OAuth token revocation endpoint.
+    Revokes an access token or refresh token.
+    """
+    form_data = await request.form()
+    token = form_data.get('token')
+
+    if not token:
+        raise HTTPException(status_code=400, detail="Missing 'token' parameter")
+
+    try:
+        payload = validate_jwt_token(token)
+        user_id = payload.get('user_id')
+
+        # Find and delete user's credentials
+        user = db.query(User).filter(User.id == user_id).first()
+        if user and user.credentials:
+            db.delete(user.credentials)
+            db.commit()
+
+        return {"status": "revoked"}
+
+    except (TokenExpiredError, InvalidTokenError):
+        # Even if token is invalid/expired, return success (idempotent)
+        return {"status": "revoked"}
+
+@app.post("/mcp/oauth/register")
+async def mcp_oauth_register(request: Request):
+    """
+    OAuth 2.0 Dynamic Client Registration endpoint (RFC 7591).
+
+    For this implementation, we accept any client registration and return
+    a client_id. We don't enforce client authentication, so client_secret
+    is optional and not used.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON in request body")
+
+    # Extract client metadata (optional fields from RFC 7591)
+    client_name = body.get('client_name', 'MCP Client')
+    redirect_uris = body.get('redirect_uris', [])
+    grant_types = body.get('grant_types', ['authorization_code', 'refresh_token'])
+    response_types = body.get('response_types', ['code'])
+    scope = body.get('scope', 'sheets drive')
+
+    # Generate a client_id (for this implementation, we accept any client)
+    # In a production system, you'd store this in a database
+    import secrets
+    client_id = f"mcp-client-{secrets.token_urlsafe(16)}"
+
+    # Return the client registration response
+    return {
+        "client_id": client_id,
+        "client_name": client_name,
+        "redirect_uris": redirect_uris,
+        "grant_types": grant_types,
+        "response_types": response_types,
+        "scope": scope,
+        "token_endpoint_auth_method": "none"
+    }
 
 async def get_jwt_from_header(authorization: Optional[str] = Header(None)) -> Optional[str]:
     if not authorization:
