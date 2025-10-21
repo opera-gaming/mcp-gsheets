@@ -11,13 +11,7 @@ dependencies = [
     "google-api-python-client>=2.117.0",
     "fastapi>=0.104.0",
     "uvicorn>=0.24.0",
-    "sqlalchemy>=2.0.0",
-    "alembic>=1.12.0",
-    "psycopg2-binary>=2.9.9",
-    "cryptography>=41.0.0",
-    "pyjwt>=2.8.0",
-    "python-multipart>=0.0.6",
-    "jinja2>=3.1.2",
+    "httpx>=0.24.0",
 ]
 
 [[project.authors]]
@@ -34,8 +28,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project.scripts]
-mcp-gsheets = "mcp_gsheets:main"
-mcp-gsheets-http = "mcp_gsheets.http_server:main"
+mcp-gsheets = "mcp_gsheets.server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mcp_gsheets"]

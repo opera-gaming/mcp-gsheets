@@ -1,21 +1,4 @@
 services:
-  postgres:
-    image: postgres:15-alpine
-    container_name: mcp-gsheets-db
-    environment:
-      POSTGRES_USER: mcpuser
-      POSTGRES_PASSWORD: mcppassword
-      POSTGRES_DB: mcp_gsheets
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mcpuser -d mcp_gsheets"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   app:
     build:
       context: .
@@ -24,24 +7,8 @@ services:
     ports:
       - "8080:8080"
     environment:
-      DATABASE_URL: postgresql://mcpuser:mcppassword@postgres:5432/mcp_gsheets
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
       BASE_URL: ${BASE_URL:-http://localhost:8080}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       PORT: 8080
-    depends_on:
-      postgres:
-        condition: service_healthy
-    command: >
-      sh -c "
-        alembic upgrade head &&
-        python -m mcp_gsheets.http_server
-      "
-    volumes:
-      - ./templates:/app/templates
-      - ./static:/app/static
-
-volumes:
-  postgres_data:
+    command: python -m mcp_gsheets.server

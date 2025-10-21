@@ -9,12 +9,14 @@ import logging
 import re
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
-from contextlib import asynccontextmanager
-from collections.abc import AsyncIterator
-from contextvars import ContextVar
 
 # MCP imports
 from fastmcp import FastMCP, Context
+from fastmcp.server.auth import OAuthProxy
+from mcp.server.auth.provider import AccessToken, TokenVerifier
+
+# HTTP client for token validation
+import httpx
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -22,9 +24,51 @@ logger = logging.getLogger(__name__)
 
 # Google API imports
 from googleapiclient.discovery import build
+from google.oauth2.credentials import Credentials
 
-# Per-request context storage for HTTP MCP server
-request_context_var: ContextVar[Optional['SpreadsheetContext']] = ContextVar('request_context', default=None)
+
+class GoogleTokenVerifier(TokenVerifier):
+    """Token verifier for Google OAuth opaque access tokens."""
+
+    def __init__(self, client_id: str, required_scopes: Optional[List[str]] = None):
+        self.client_id = client_id
+        self.tokeninfo_url = "https://oauth2.googleapis.com/tokeninfo"
+        self.required_scopes = required_scopes or []
+
+    async def verify_token(self, token: str) -> Optional[AccessToken]:
+        """Verify Google access token using tokeninfo endpoint."""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    self.tokeninfo_url,
+                    params={"access_token": token}
+                )
+
+                if response.status_code != 200:
+                    logger.warning(f"Token validation failed: {response.status_code}")
+                    return None
+
+                token_info = response.json()
+
+                # Verify the token is for our client
+                if token_info.get("aud") != self.client_id:
+                    logger.warning("Token audience mismatch")
+                    return None
+
+                # Extract scopes
+                scopes = token_info.get("scope", "").split()
+
+                # Return AccessToken
+                return AccessToken(
+                    token=token,
+                    client_id=self.client_id,
+                    scopes=scopes,
+                    expires_at=None  # Google's tokeninfo doesn't return expiry in a standard format
+                )
+        except Exception as e:
+            logger.error(f"Error verifying token: {e}")
+            return None
+
 
 @dataclass
 class SpreadsheetContext:
@@ -34,49 +78,47 @@ class SpreadsheetContext:
     folder_id: Optional[str] = None
 
 
-@asynccontextmanager
-async def spreadsheet_lifespan(server: FastMCP) -> AsyncIterator[SpreadsheetContext]:
-    """
-    Manage Google Spreadsheet API connection lifecycle.
-
-    Authentication is handled per-request via JWT tokens in the HTTP middleware.
-    The lifespan context returns None services as a fallback.
-    """
-    logger.info("MCP server starting - using per-request authentication only")
-
-    try:
-        yield SpreadsheetContext(
-            sheets_service=None,
-            drive_service=None,
-            folder_id=None
-        )
-    finally:
-        logger.info("MCP server shutting down")
-
-
-# Get BASE_URL for OAuth endpoints
+# Get environment variables
+GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID')
+GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET')
 BASE_URL = os.environ.get('BASE_URL', 'http://localhost:8080')
 
-# Initialize the MCP server
-mcp = FastMCP(
-    "mcp-gsheets",
-    lifespan=spreadsheet_lifespan
+if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+    raise RuntimeError(
+        "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables are required. "
+        "Please set them in your .env file or environment."
+    )
+
+# Configure OAuth proxy to Google
+# This provides full MCP OAuth server functionality while proxying to Google OAuth
+# Use custom GoogleTokenVerifier for validating Google's opaque access tokens
+token_verifier = GoogleTokenVerifier(
+    client_id=GOOGLE_CLIENT_ID,
+    required_scopes=[
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive.file"
+    ]
 )
 
-# Note: OAuth capability is advertised via the /mcp/oauth/metadata endpoint
-# MCP clients can discover OAuth support by checking that endpoint
-# The FastMCP library handles capability negotiation automatically
+oauth_provider = OAuthProxy(
+    upstream_authorization_endpoint="https://accounts.google.com/o/oauth2/v2/auth",
+    upstream_token_endpoint="https://oauth2.googleapis.com/token",
+    upstream_client_id=GOOGLE_CLIENT_ID,
+    upstream_client_secret=GOOGLE_CLIENT_SECRET,
+    upstream_revocation_endpoint="https://oauth2.googleapis.com/revoke",
+    token_verifier=token_verifier,
+    base_url=BASE_URL,
+    redirect_path="/auth/callback",
+    valid_scopes=[
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive.file"
+    ]
+)
 
+# Initialize the MCP server with OAuth proxy
+mcp = FastMCP("mcp-gsheets", auth=oauth_provider)
 
-# ============================================================================
-# HEALTH ENDPOINT
-# ============================================================================
-
-@mcp.custom_route("/health", methods=["GET"])
-async def health_check(request):
-    """Health check endpoint that returns 204 No Content"""
-    from starlette.responses import Response
-    return Response(status_code=204)
+logger.info("MCP server initialized with Google OAuth proxy")
 
 
 # ============================================================================
@@ -84,15 +126,37 @@ async def health_check(request):
 # ============================================================================
 
 def get_context(ctx: Context) -> SpreadsheetContext:
-    """Get spreadsheet context, preferring per-request auth over lifespan auth"""
-    # Try to get per-request context from contextvar first (set by middleware)
-    per_request_ctx = request_context_var.get()
-    if per_request_ctx is not None:
-        logger.info("Using per-request context from middleware")
-        return per_request_ctx
-    # Fall back to lifespan context
-    logger.info("Using lifespan context (fallback)")
-    return ctx.request_context.lifespan_context
+    """Get spreadsheet context with authenticated Google API services"""
+    # Get OAuth access token from HTTP request (provided by OAuthProxy)
+    request = ctx.get_http_request()
+    auth_header = request.headers.get("authorization", "")
+
+    if not auth_header.startswith("Bearer "):
+        raise ValueError("No access token found. Please authenticate with Google OAuth.")
+
+    # Extract the token from "Bearer <token>"
+    access_token = auth_header[7:]  # Skip "Bearer "
+
+    # The access token from OAuthProxy is a Google OAuth token
+    # We can use it directly to call Google APIs
+    creds = Credentials(
+        token=access_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=GOOGLE_CLIENT_ID,
+        client_secret=GOOGLE_CLIENT_SECRET
+    )
+
+    # Build Google API services
+    sheets_service = build('sheets', 'v4', credentials=creds)
+    drive_service = build('drive', 'v3', credentials=creds)
+
+    logger.info("Built Google API services with OAuth credentials")
+
+    return SpreadsheetContext(
+        sheets_service=sheets_service,
+        drive_service=drive_service,
+        folder_id=None
+    )
 
 def get_sheet_id(sheets_service: Any, spreadsheet_id: str, sheet_name: str) -> Optional[int]:
     """Get the sheet ID from sheet name"""
@@ -1842,3 +1906,24 @@ def share_spreadsheet(
         'successes': successes,
         'failures': failures
     }
+
+
+# ============================================================================
+# MAIN ENTRY POINT
+# ============================================================================
+
+def main():
+    """Run the MCP server"""
+    import uvicorn
+
+    port = int(os.environ.get('PORT', 8080))
+    logger.info(f"Starting mcp-gsheets server on port {port}")
+
+    # Get the FastMCP HTTP app with OAuth routes automatically included
+    app = mcp.http_app()
+
+    uvicorn.run(app, host="0.0.0.0", port=port)
+
+
+if __name__ == "__main__":
+    main()
