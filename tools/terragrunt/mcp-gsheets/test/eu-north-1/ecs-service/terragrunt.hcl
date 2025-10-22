@@ -12,10 +12,6 @@ include {
   path = find_in_parent_folders()
 }
 
-dependency "rds_instance" {
-  config_path = "../rds-instance"
-}
-
 locals {
   environment    = read_terragrunt_config(find_in_parent_folders("env.hcl")).locals.env
   aws_region     = read_terragrunt_config(find_in_parent_folders("region.hcl")).locals.aws_default_region
@@ -102,27 +98,11 @@ inputs = merge(local, {
           "value" : "${local.environment}"
         },
         {
-          "name" : "S3_BUCKET_NAME"
-          "value" : "gg-mcp-gsheets-test"
-        },
-        {
           "name" : "BASE_URL"
           "value" : "https://mcp-gsheets.gmx.dev"
         }
       ]
       secrets = [
-        {
-          "name" : "DATABASE_URL",
-          "valueFrom" : "${dependency.rds_instance.outputs.aws_ssm_secret_arn}:url::"
-        },
-        {
-          "name" : "JWT_SECRET_KEY",
-          "valueFrom" : "${local.app_secrets}:JWT_SECRET_KEY::"
-        },
-        {
-          "name" : "ENCRYPTION_KEY",
-          "valueFrom" : "${local.app_secrets}:ENCRYPTION_KEY::"
-        },
         {
           "name" : "GOOGLE_CLIENT_ID",
           "valueFrom" : "${local.app_secrets}:GOOGLE_CLIENT_ID::"
@@ -189,14 +169,6 @@ inputs = merge(local, {
   task_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      {
-        "Action" : "s3:*",
-        "Effect" : "Allow",
-        "Resource" : [
-          "arn:aws:s3:::gg-mcp-gsheets-test/*",
-          "arn:aws:s3:::gg-mcp-gsheets-test"
-        ]
-      },
       {
         Effect = "Allow",
         Action = [
