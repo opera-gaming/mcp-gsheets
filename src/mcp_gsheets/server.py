@@ -1915,12 +1915,20 @@ def share_spreadsheet(
 def main():
     """Run the MCP server"""
     import uvicorn
+    from starlette.responses import JSONResponse
+    from starlette.requests import Request
 
     port = int(os.environ.get('PORT', 8080))
     logger.info(f"Starting mcp-gsheets server on port {port}")
 
     # Get the FastMCP HTTP app with OAuth routes automatically included
     app = mcp.http_app()
+
+    # Add health check endpoint for ECS
+    async def health_check(request: Request):
+        return JSONResponse({"status": "healthy", "service": "mcp-gsheets"})
+
+    app.add_route("/health", health_check, methods=["GET"])
 
     uvicorn.run(app, host="0.0.0.0", port=port)
 
